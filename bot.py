@@ -3,19 +3,22 @@ from threading import Thread
 
 app = Flask('')
 
-@app.route('/')
+# Hier fügen wir methods=['GET', 'HEAD'] hinzu:
+@app.route('/', methods=['GET', 'HEAD'])
 def home():
-    return "Bot ist online!"
+    return "Bot is online!"
 
 def run():
-    app.run(host='0.0.0.0', port=8080)
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
 
 def keep_alive():
     t = Thread(target=run)
     t.start()
 
-# Hier wird der Webserver gestartet
-keep_alive()
+if __name__ == "__main__":
+    keep_alive()
+    # Hier startet dein Bot...
 
 # Ab hier kommt dein normaler Bot-Code:
 import discord
