@@ -1,12 +1,24 @@
 import os
-from flask import Flask
+import re
+import json
+import time
+import asyncio
+import requests
 from threading import Thread
+from flask import Flask
 
+import discord
+from discord.ext import commands, tasks
+from discord import app_commands, ui
+
+# ==========================================
+# FLASK WEBSERVER FÜR KEEP-ALIVE
+# ==========================================
 app = Flask('')
 
 @app.route('/', methods=['GET', 'HEAD'])
 def home():
-    return "Bot is online!"
+    return "Bot ist online!"
 
 def run():
     port = int(os.environ.get("PORT", 8080))
@@ -16,38 +28,12 @@ def keep_alive():
     t = Thread(target=run)
     t.start()
 
-if __name__ == "__main__":
-    keep_alive()
-from flask import Flask
-from threading import Thread
-import os
-import discord
-from discord.ext import commands, tasks
-from discord import app_commands, ui
-import requests
-import time
-import re
-import json
-import asyncio
-
-# --- FLASK WEBSERVER FÜR KEEP-ALIVE ---
-app = Flask('')
-
-@app.route('/')
-def home():
-    return "Bot ist online!"
-
-def run():
-    app.run(host='0.0.0.0', port=8080)
-
-def keep_alive():
-    t = Thread(target=run)
-    t.start()
-
 # Webserver starten
 keep_alive()
 
-# --- DISCORD BOT INITIALISIERUNG ---
+# ==========================================
+# DISCORD BOT INITIALISIERUNG
+# ==========================================
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
@@ -618,6 +604,8 @@ class ModerationEintragModal(ui.Modal):
         moderation_eintraege[r_key].append(eintrag)
 
         is_new_ban_bolo = False
+        bolo_data = None
+
         if typ == "Ban Bolo":
             existing = any(b['roblox_name'].lower() == r_key for b in active_ban_bolos)
             if not existing:
@@ -650,8 +638,7 @@ class ModerationEintragModal(ui.Modal):
 
         save_data()
 
-        # Ban Bolo Log auslösen falls neu erstellt
-        if is_new_ban_bolo:
+        if is_new_ban_bolo and bolo_data:
             bolo_log_kanal = interaction.guild.get_channel(BAN_BOLO_LOG_KANAL_ID)
             if bolo_log_kanal:
                 b_embed = discord.Embed(
@@ -837,7 +824,6 @@ class BanBoloAbschliessenView(ui.View):
         active_ban_bolos = [b for b in active_ban_bolos if b['roblox_name'].lower() != self.roblox_name.lower()]
         save_data()
 
-        # Ban Bolo Log für Akzeptieren/Abschließen senden
         bolo_log_kanal = interaction.guild.get_channel(BAN_BOLO_LOG_KANAL_ID)
         if bolo_log_kanal:
             b_embed = discord.Embed(
@@ -1044,7 +1030,6 @@ class AdminAcceptView(ui.View):
             )
         await refresh_leaderboard_in_channel()
 
-        # Call Admin Log aktualisieren/senden
         call_log_kanal = interaction.guild.get_channel(CALL_ADMIN_LOG_KANAL_ID)
         if call_log_kanal:
             log_accept_embed = discord.Embed(
@@ -1069,7 +1054,7 @@ class AdminAcceptView(ui.View):
             except discord.Forbidden:
                 pass
 
-        await interaction.followup.send(f"✅ Call angenommen!", ephemeral=True)
+        await interaction.followup.send("✅ Call angenommen!", ephemeral=True)
 
 
 class CallAdminModal(ui.Modal, title="Admin Rufen"):
@@ -1088,6 +1073,8 @@ class CallAdminModal(ui.Modal, title="Admin Rufen"):
         await interaction.followup.send(embed=confirm_embed, ephemeral=True)
 
         log_channel = interaction.guild.get_channel(CALL_ADMIN_KANAL_ID)
+        avatar_url = get_roblox_avatar_url(self.roblox_name.value)
+
         if log_channel:
             admin_embed = discord.Embed(title="⚠️ Admin angefordert!", color=discord.Color.red())
             admin_embed.add_field(name="**Roblox Benutzername:**", value=self.roblox_name.value, inline=False)
@@ -1095,14 +1082,12 @@ class CallAdminModal(ui.Modal, title="Admin Rufen"):
             admin_embed.add_field(name="**Grund:**", value=self.grund.value, inline=False)
             admin_embed.add_field(name="**Discord Benutzer:**", value=interaction.user.mention, inline=False)
 
-            avatar_url = get_roblox_avatar_url(self.roblox_name.value)
             if avatar_url:
                 admin_embed.set_thumbnail(url=avatar_url)
 
             view = AdminAcceptView(requester_user=interaction.user, roblox_name=self.roblox_name.value, ort=self.ort.value, grund=self.grund.value)
-            msg = await log_channel.send(content=f"<@&{CALL_ADMIN_TEAM_ROLLE_ID}>", embed=admin_embed, view=view)
+            await log_channel.send(content=f"<@&{CALL_ADMIN_TEAM_ROLLE_ID}>", embed=admin_embed, view=view)
 
-        # Call Admin Log für neue Erstellung senden
         call_log_kanal = interaction.guild.get_channel(CALL_ADMIN_LOG_KANAL_ID)
         if call_log_kanal:
             c_log_embed = discord.Embed(
@@ -1137,7 +1122,6 @@ class StartCallAdminView(ui.View):
 async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
     guild = member.guild
 
-    # Sprachkanal-Verlassen-Logik für Voice-XP (wenn man Call verlässt)
     if before.channel and before.channel.id in ALLOWED_VOICE_CHANNELS:
         if not after.channel or after.channel.id not in ALLOWED_VOICE_CHANNELS:
             join_info = voice_join_times.pop(member.id, None)
@@ -1156,7 +1140,6 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
                         )
                         await refresh_leaderboard_in_channel()
 
-    # Sprachkanal-Beitreten-Logik
     if after.channel and after.channel.id in ALLOWED_VOICE_CHANNELS:
         if not before.channel or before.channel.id not in ALLOWED_VOICE_CHANNELS:
             voice_join_times[member.id] = time.time()
@@ -1503,7 +1486,7 @@ async def xp_boost(interaction: discord.Interaction, percentage: int, duration: 
             description=f"Es ist ab sofort ein **+{percentage}% XP-Boost** für **{readable}** aktiv! Nutze die Zeit, um extra XP zu sammeln.",
             color=discord.Color.green()
         )
-        await boost_channel.send(content=f"@everyone", embed=ann_embed)
+        await boost_channel.send(content="@everyone", embed=ann_embed)
 
 
 @bot.tree.command(name="xp-stats", description="Zeige deine eigenen XP oder die eines anderen Teammitglieds an.")
@@ -1584,15 +1567,13 @@ async def dizzykontrolle(interaction: discord.Interaction, user: discord.Member)
         color=discord.Color.green()
     )
     
-    # Nachricht im Ursprungskanal senden und nach 1 Minute löschen
-    msg = await interaction.response.send_message(embed=embed)
+    await interaction.response.send_message(embed=embed)
     try:
         original_msg = await interaction.original_response()
         await original_msg.delete(delay=60)
     except Exception:
         pass
 
-    # Log in den Dizzykontroll-Log Kanal senden und nach 1 Minute löschen
     dizzy_log_kanal = interaction.guild.get_channel(DIZZY_LOG_KANAL_ID)
     if dizzy_log_kanal:
         log_embed = discord.Embed(
@@ -1732,6 +1713,4 @@ async def setuptimeleaderboard(ctx):
     await ctx.send("✅ Zeitauswahl-Leaderboard Panel gesendet!")
 
 # Bot starten
-import os
-
 bot.run(os.getenv("DISCORD_TOKEN"))
