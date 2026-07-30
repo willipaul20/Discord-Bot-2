@@ -1564,4 +1564,4 @@ async def setuptimeleaderboard(ctx):
     await ctx.send("✅ Zeitauswahl-Leaderboard Panel gesendet!")
 
 # Bot starten
-bot.run(os.environ.get("DISCORD_BOT_TOKEN"))
+bot.run("DEIN_ECHTER_DISCORD_TOKEN_HIER_EINTRAGEN")
