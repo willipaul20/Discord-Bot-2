@@ -88,8 +88,25 @@ VERIFY_KANAL_ID = 1527404574430855340
 UNVERIFIED_ROLLE_ID = 1527404452829466735
 VERIFIED_ROLLE_ID = 1527349817586483229
 
-# LINK FÜR DIE BEWERBUNG (PROTOKOLL)
-BEWERBUNG_LINK = "https://google.com"  # 👈 Hier deinen Formular-/Protokoll-Link eintragen!
+# BEWERBUNG SYSTEM KONFIGURATION
+ALLOWED_ROLES = [1527349818031214718, 1528123954659590154]
+LOG_CHANNEL_ID = 1532404153815662753
+PASS_SCORE = 35
+MAX_SCORE = 54
+
+QUESTIONS = [
+    {"q": "Welche Regeln sind laut Roblox verboten?", "max": 10},
+    {"q": "Was bedeutet die New Life Regel?", "max": 6},
+    {"q": "Erkläre was FRP ist.", "max": 2},
+    {"q": "Was bedeutet Combat Logging?", "max": 6},
+    {"q": "Erkläre was du unter RDM verstehst.", "max": 2},
+    {"q": "Erkläre was Meta Gaming ist und was machst du wenn du jemanden erwischt.", "max": 8},
+    {"q": "Erkläre was du unter VDM verstehst.", "max": 2},
+    {"q": "Wie viele Geiseln darfst du maximal nehmen und wie hoch darf das Lösegeld sein?", "max": 6},
+    {"q": "Stell dir vor ein Cop stürmt in einer Geiselnahme, obwohl die Geiseln bedroht wurden. Was tust du?", "max": 6},
+    {"q": "Was sind unsere Savezonen?", "max": 4},
+    {"q": "Was muss man in Savezonen beachten?", "max": 2}
+]
 
 # ==========================================
 # DATENBANK & SPEICHER (MIT PERSISTENZ)
@@ -280,14 +297,176 @@ def get_roblox_avatar_url(username: str) -> str:
 
 
 # ==========================================
-# BEWERBUNG UI-KOMPONENTE
+# BEWERBUNG SYSTEM (MODALS & VIEWS)
 # ==========================================
 
-class BewerbungView(ui.View):
+class StartModal(discord.ui.Modal, title="Bewerbungsgespräch Starten"):
+    applicant = discord.ui.TextInput(
+        label="Bewerber (Name oder Mention)",
+        placeholder="@Nutzername oder Name des Bewerbers",
+        required=True
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        view = EvaluationView(interviewer=interaction.user, applicant_str=self.applicant.value)
+        embed = view.get_current_embed()
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+
+class NoteModal(discord.ui.Modal, title="Notiz zur Frage hinzufügen"):
+    def __init__(self, current_note=""):
+        super().__init__()
+        self.note_input = discord.ui.TextInput(
+            label="Anmerkung / Notiz",
+            style=discord.TextStyle.paragraph,
+            default=current_note,
+            required=False,
+            placeholder="Optional: Bemerkung zur Antwort hier eintragen..."
+        )
+        self.add_item(self.note_input)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+
+
+class FazitModal(discord.ui.Modal, title="Abschluss & Fazit"):
+    fazit = discord.ui.TextInput(
+        label="Fazit zum Bewerber",
+        style=discord.TextStyle.paragraph,
+        placeholder="z.B. Hat gut geantwortet, brauchte bei FRP etwas Bedenkzeit...",
+        required=True
+    )
+
+    def __init__(self, eval_view):
+        super().__init__()
+        self.eval_view = eval_view
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        await self.eval_view.finish_evaluation(interaction, self.fazit.value)
+
+
+class EvaluationView(discord.ui.View):
+    def __init__(self, interviewer, applicant_str):
+        super().__init__(timeout=None)
+        self.interviewer = interviewer
+        self.applicant_str = applicant_str
+        self.current_idx = 0
+        self.answers = {} # idx: {"points": int, "emoji": str, "note": str}
+
+    def get_current_embed(self):
+        q_data = QUESTIONS[self.current_idx]
+        embed = discord.Embed(
+            title=f"📋 Frage {self.current_idx + 1} von {len(QUESTIONS)}",
+            description=f"**{q_data['q']}**\n\n*Maximal erreichbare Punkte:* **{q_data['max']} BP**",
+            color=discord.Color.blue()
+        )
+        embed.set_author(name=f"Bewerber: {self.applicant_str}")
+        
+        saved = self.answers.get(self.current_idx)
+        if saved:
+            embed.add_field(name="Aktuelle Bewertung", value=f"{saved['emoji']} ({saved['points']} Punkte)", inline=False)
+            if saved['note']:
+                embed.add_field(name="Notiz", value=saved['note'], inline=False)
+                
+        return embed
+
+    @discord.ui.button(label="100%", style=discord.ButtonStyle.success, emoji="🟢")
+    async def btn_green(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.save_answer(interaction, 1.0, "🟢")
+
+    @discord.ui.button(label="50%", style=discord.ButtonStyle.warning, emoji="🟡")
+    async def btn_yellow(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.save_answer(interaction, 0.5, "🟡")
+
+    @discord.ui.button(label="0%", style=discord.ButtonStyle.danger, emoji="🔴")
+    async def btn_red(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.save_answer(interaction, 0.0, "🔴")
+
+    @discord.ui.button(label="📝 Notiz hinzufügen/ändern", style=discord.ButtonStyle.secondary, row=1)
+    async def btn_note(self, interaction: discord.Interaction, button: discord.ui.Button):
+        current_note = self.answers.get(self.current_idx, {}).get("note", "")
+        modal = NoteModal(current_note=current_note)
+        await interaction.response.send_modal(modal)
+        await modal.wait()
+        
+        if self.current_idx not in self.answers:
+            self.answers[self.current_idx] = {"points": 0, "emoji": "❌ Nicht bewertet", "note": modal.note_input.value}
+        else:
+            self.answers[self.current_idx]["note"] = modal.note_input.value
+            
+        await interaction.edit_original_response(embed=self.get_current_embed(), view=self)
+
+    async def save_answer(self, interaction: discord.Interaction, multiplier: float, emoji: str):
+        max_p = QUESTIONS[self.current_idx]["max"]
+        pts = int(max_p * multiplier)
+        
+        current_note = self.answers.get(self.current_idx, {}).get("note", "")
+        self.answers[self.current_idx] = {
+            "points": pts,
+            "emoji": emoji,
+            "note": current_note
+        }
+
+        if self.current_idx < len(QUESTIONS) - 1:
+            self.current_idx += 1
+            await interaction.response.edit_message(embed=self.get_current_embed(), view=self)
+        else:
+            modal = FazitModal(self)
+            await interaction.response.send_modal(modal)
+
+    async def finish_evaluation(self, interaction: discord.Interaction, fazit: str):
+        total_points = sum(ans["points"] for ans in self.answers.values())
+        passed = total_points >= PASS_SCORE
+
+        log_channel = bot.get_channel(LOG_CHANNEL_ID)
+        
+        color = discord.Color.green() if passed else discord.Color.red()
+        status_text = "✅ **BESTANDEN**" if passed else "❌ **NICHT BESTANDEN**"
+
+        embed = discord.Embed(
+            title="📄 Auswertung Bewerbungsgespräch",
+            color=color
+        )
+        
+        embed.add_field(name="👤 Bewerber", value=self.applicant_str, inline=True)
+        embed.add_field(name="🛡️ Ausbilder", value=self.interviewer.mention, inline=True)
+        embed.add_field(name="📊 Ergebnis", value=f"**{total_points} / {MAX_SCORE} Punkte**\nStatus: {status_text}", inline=False)
+
+        for i, q in enumerate(QUESTIONS):
+            ans = self.answers.get(i, {"emoji": "⚪", "points": 0, "note": ""})
+            val = f"Bewertung: {ans['emoji']} (**{ans['points']} / {q['max']} Pkt.**)"
+            if ans["note"]:
+                val += f"\n*Anmerkung:* {ans['note']}"
+            
+            embed.add_field(
+                name=f"{i+1}. {q['q']}",
+                value=val,
+                inline=False
+            )
+
+        embed.add_field(name="📝 Fazit des Ausbilders", value=fazit, inline=False)
+        embed.set_footer(text="Protokoll generiert am • Sirius Roleplay")
+
+        if log_channel:
+            await log_channel.send(content=f"Neues Bewerbungsprotokoll für {self.applicant_str}:", embed=embed)
+            await interaction.edit_original_response(content="✅ **Das Gespräch wurde erfolgreich protokolliert und abgespeichert!**", embed=None, view=None)
+        else:
+            await interaction.edit_original_response(content="❌ Fehler: Protokoll-Kanal konnte nicht gefunden werden!", embed=None, view=None)
+
+
+class StartBewerbungView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
-        # Direkt ein Link-Button, der zum Protokoll/Formular führt
-        self.add_item(ui.Button(label="📝 Zum Bewerbungsprotokoll", url=BEWERBUNG_LINK, style=discord.ButtonStyle.link))
+
+    @discord.ui.button(label="Bewerbungsgespräch starten", style=discord.ButtonStyle.primary, emoji="📋", custom_id="start_bw_button")
+    async def start_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        user_role_ids = [role.id for role in interaction.user.roles]
+        if not any(role_id in user_role_ids for role_id in ALLOWED_ROLES):
+            await interaction.response.send_message("❌ Du hast nicht die benötigte Rolle, um ein Gespräch zu führen!", ephemeral=True)
+            return
+
+        await interaction.response.send_modal(StartModal())
 
 
 # ==========================================
@@ -1342,7 +1521,7 @@ async def on_ready():
     bot.add_view(BanBoloAbschliessenView())
     bot.add_view(TimeLeaderboardView())
     bot.add_view(VerifyView())
-    bot.add_view(BewerbungView())
+    bot.add_view(StartBewerbungView())
 
     try:
         synced = await bot.tree.sync()
@@ -1608,27 +1787,22 @@ async def dizzykontrolle(interaction: discord.Interaction, user: discord.Member)
             pass
 
 
-@bot.command()
+@bot.command(name="setupbewerbung")
 @commands.has_permissions(administrator=True)
-async def setupbewerbung(ctx):
-    # Chat-Befehl löschen für eine saubere Optik
+async def setup_bewerbung(ctx):
     try:
         await ctx.message.delete()
     except Exception:
         pass
 
     embed = discord.Embed(
-        title="📋 Bewerbung — Sirius RP",
-        description=(
-            "Möchtest du Teil unseres Teams werden oder dich auf eine bestimmte Stelle bewerben?\n\n"
-            "Klicke einfach auf den unteren Button, um direkt zum Bewerbungsprotokoll zu gelangen."
-        ),
-        color=discord.Color.blue()
+        title="📋 Bewerbungsgespräch Auswertung",
+        description="Klicke auf den Button unten, um das digitale Protokoll für ein Bewerbungsgespräch zu starten.\n\n*Hinweis: Nur autorisierte Teamausbilder können diesen Button verwenden.*",
+        color=discord.Color.gold()
     )
-    embed.set_footer(text="Sirius RP • Bewerbungssystem")
 
-    # Sendet das Embed zusammen mit der BewerbungView (enthält den Protokoll-Button)
-    await ctx.send(embed=embed, view=BewerbungView())
+    view = StartBewerbungView()
+    await ctx.send(embed=embed, view=view)
 
 
 @bot.command()
@@ -1646,7 +1820,7 @@ async def setupverify(ctx):
             "Um vollen Zugriff auf alle Kanäle, Kategorien und Funktionen unseres Servers zu erhalten, "
             "musst du dich kurz verifizieren.\n\n"
             "**Was ist die Verifizierung?**\n"
-            "Die Verifizierung dient als Schutz vor Bots, Spam und ungebetenen Gästen. Sie stellt sicher, "
+            "Die Verifizierung dient als Schutz vor Bots, Spam und ungebetenen Gäste. Sie stellt sicher, "
             "dass du ein echter Community-Mitglied bist.\n\n"
             "**Wie funktioniert es?**\n"
             "Klicke einfach auf den unteren Button (**\"Verifizieren\"**). Dadurch wird dir automatisch "
