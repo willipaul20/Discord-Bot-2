@@ -10,6 +10,7 @@ from flask import Flask
 import discord
 from discord.ext import commands, tasks
 from discord import app_commands, ui
+from discord.errors import NotFound
 
 # ==========================================
 # HELPER FUNCTIONS
@@ -132,7 +133,7 @@ QUESTIONS = [
     {"q": "Was bedeutet die New Life Regel?", "max": 6},
     {"q": "Erkläre was FRP ist.", "max": 2},
     {"q": "Was bedeutet Combat Logging?", "max": 6},
-    {"q": "Erkläre what du unter RDM verstehst." if False else "Erkläre was du unter RDM verstehst.", "max": 2},
+    {"q": "Erkläre what du under RDM verstehst." if False else "Erkläre was du unter RDM verstehst.", "max": 2},
     {"q": "Erkläre was Meta Gaming ist und was machst du wenn du jemanden erwischt.", "max": 8},
     {"q": "Erkläre was du unter VDM verstehst.", "max": 2},
     {"q": "Wie viele Geiseln darfst du maximal nehmen und wie hoch darf das Lösegeld sein?", "max": 6},
@@ -989,7 +990,13 @@ class DeleteEintragSelect(ui.Select):
 
             view = SearchResultView(r_name=self.r_name)
             embed = view.build_embed()
-            await interaction.message.edit(embed=embed, view=view)
+            
+            # ABSICHERUNG GEGEN NotFound FEHLER AUF RENDER:
+            try:
+                await interaction.message.edit(embed=embed, view=view)
+            except NotFound:
+                pass
+
             await interaction.followup.send(f"✅ Eintrag **#{idx+1} ({removed['typ']})** für **{self.r_name}** wurde erfolgreich entfernt und in den Logs festgehalten.", ephemeral=True)
         else:
             await interaction.followup.send("❌ Dieser Eintrag existiert nicht mehr.", ephemeral=True)
