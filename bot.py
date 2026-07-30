@@ -20,11 +20,9 @@ if __name__ == "__main__":
     keep_alive()
     # Hier startet dein Discord-Bot...
 
-# Ab hier kommt dein normaler Bot-Code:
-import discord
-from discord.ext import commands, tasks
-# ... (der Rest deines Codes folgt hier)
-
+from flask import Flask
+from threading import Thread
+import os
 import discord
 from discord.ext import commands, tasks
 from discord import app_commands, ui
@@ -32,9 +30,26 @@ import requests
 import time
 import re
 import json
-import os
 import asyncio
 
+# --- FLASK WEBSERVER FÜR KEEP-ALIVE ---
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Bot ist online!"
+
+def run():
+    app.run(host='0.0.0.0', port=8080)
+
+def keep_alive():
+    t = Thread(target=run)
+    t.start()
+
+# Webserver starten
+keep_alive()
+
+# --- DISCORD BOT INITIALISIERUNG ---
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
@@ -1474,6 +1489,5 @@ async def setuptimeleaderboard(ctx):
     await ctx.send(embed=embed, view=TimeLeaderboardView())
     await ctx.send("✅ Zeitauswahl-Leaderboard Panel gesendet!")
 
-import os
-
+# Bot starten
 bot.run(os.environ.get("DISCORD_TOKEN"))
