@@ -133,7 +133,7 @@ QUESTIONS = [
     {"q": "Was bedeutet die New Life Regel?", "max": 6},
     {"q": "Erkläre was FRP ist.", "max": 2},
     {"q": "Was bedeutet Combat Logging?", "max": 6},
-    {"q": "Erkläre what du unter RDM verstehst.", "max": 2}, # Kleinigkeit angepasst falls nötig, bleibt aber funktional
+    {"q": "Erkläre was du unter RDM verstehst.", "max": 2},
     {"q": "Erkläre was du unter Meta Gaming verstehst und was machst du wenn du jemanden erwischt.", "max": 8},
     {"q": "Erkläre was du unter VDM verstehst.", "max": 2},
     {"q": "Wie viele Geiseln darfst du maximal nehmen und wie hoch darf das Lösegeld sein?", "max": 6},
@@ -1074,20 +1074,14 @@ class SetupEintragView(ui.View):
             await interaction.response.send_message("❌ Du hast keine Berechtigung, dieses Tool zu nutzen!", ephemeral=True)
             return
         
-        if interaction.response.is_done():
-            return
-
-        await interaction.response.send_message("Bitte wähle eine Option aus:", view=ModerationSelectView(), ephemeral=True)
+        await interaction.response.defer(ephemeral=True)
+        await interaction.followup.send("Bitte wähle eine Option aus:", view=ModerationSelectView(), ephemeral=True)
 
     @discord.ui.button(label="Einträge abfragen", style=discord.ButtonStyle.secondary, emoji="🔍", custom_id="setup_search_btn")
     async def search_button(self, interaction: discord.Interaction, button: ui.Button):
         if not is_team_member(interaction.user):
             await interaction.response.send_message("❌ Du hast keine Berechtigung, dieses Tool zu nutzen!", ephemeral=True)
             return
-            
-        if interaction.response.is_done():
-            return
-            
         await interaction.response.send_modal(SearchEintragModal())
 
 
@@ -1779,7 +1773,7 @@ async def xp_boost(interaction: discord.Interaction, percentage: int, duration: 
 async def xp_stats(interaction: discord.Interaction, user: discord.Member = None):
     target = user or interaction.user
     if not is_team_member(target):
-        await interaction.response.send_message("❌ Dieser Benutzer is kein Teammitglied.", ephemeral=True)
+        await interaction.response.send_message("❌ Dieser Benutzer ist kein Teammitglied.", ephemeral=True)
         return
 
     val = user_xp.get(target.id, 0)
