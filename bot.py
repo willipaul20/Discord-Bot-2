@@ -158,7 +158,11 @@ def load_data():
                 raw_dizzy = data.get("durchgefuehrte_kontrollen", [])
                 loaded_dizzy = {(int(item[0]), int(item[1])) for item in raw_dizzy}
 
-                return loaded_xp, data.get("moderation_eintraege", {}), data.get("active_ban_bolos", []), loaded_dizzy, data.get("time_leaderboard", [])
+                # Sicherstellen, dass Keys in moderation_eintraege lowercase sind
+                raw_mod = data.get("moderation_eintraege", {})
+                loaded_mod = {k.lower(): v for k, v in raw_mod.items()}
+
+                return loaded_xp, loaded_mod, data.get("active_ban_bolos", []), loaded_dizzy, data.get("time_leaderboard", [])
         except Exception as e:
             print(f"Fehler beim Laden der Datenbank: {e}")
     return {}, {}, [], set(), []
@@ -991,7 +995,6 @@ class DeleteEintragSelect(ui.Select):
             view = SearchResultView(r_name=self.r_name)
             embed = view.build_embed()
             
-            # ABSICHERUNG GEGEN NotFound FEHLER AUF RENDER:
             try:
                 await interaction.message.edit(embed=embed, view=view)
             except NotFound:
@@ -1034,7 +1037,6 @@ class SearchResultView(ui.View):
                 t_upper = e['typ'].upper()
                 badge = "🔴" if "BANN" in t_upper or "BOLO" in t_upper else "🟡" if "WARN" in t_upper else "🔵"
                 
-                # Prüfen, ob die Dauer abgelaufen ist (nur bei Warns/Banns mit Zeitangabe)
                 is_expired = False
                 dauer_str = e['dauer'].strip().lower()
                 if dauer_str not in ["permanent", "perma", "unendlich", "lifetime"]:
@@ -1043,7 +1045,6 @@ class SearchResultView(ui.View):
                         if current_time >= (e['timestamp'] + sec):
                             is_expired = True
 
-                # Formatierung mit Durchstreichung anwenden, falls abgelaufen
                 if is_expired:
                     field_value = (
                         f"~~• **Grund:** {e['grund']}~~\n"
@@ -1075,10 +1076,7 @@ class SetupEintragView(ui.View):
             await interaction.response.send_message("❌ Du hast keine Berechtigung, dieses Tool zu nutzen!", ephemeral=True)
             return
         
-        # Schritt 1: Interaktion sofort absichern (verhindert den Timeout-Fehler)[cite: 7]
         await interaction.response.defer(ephemeral=True)
-
-        # Schritt 2: Danach die Nachricht mit der neuen View senden (hier als Followup, da defer genutzt wurde)[cite: 7]
         await interaction.followup.send("Bitte wähle eine Option aus:", view=ModerationSelectView(), ephemeral=True)
 
     @discord.ui.button(label="Einträge abfragen", style=discord.ButtonStyle.secondary, emoji="🔍", custom_id="setup_search_btn")
