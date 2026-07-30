@@ -91,6 +91,12 @@ XP_BOOST_ANNOUNCEMENT_KANAL_ID = 1527677485960007680
 EINTRAG_PANEL_KANAL_ID = 1532144498317070586
 BAN_BOLO_KANAL_ID = 1532144498317070586
 
+# Neue Log-Kanal IDs
+DIZZY_LOG_KANAL_ID = 1532348593573199872
+XP_LOG_KANAL_ID = 1532348632412721312
+BAN_BOLO_LOG_KANAL_ID = 1532348686385025205
+CALL_ADMIN_LOG_KANAL_ID = 1532348723705811016
+
 # Verify System IDs
 VERIFY_KANAL_ID = 1527404574430855340
 UNVERIFIED_ROLLE_ID = 1527404452829466735
@@ -138,6 +144,7 @@ user_xp, moderation_eintraege, active_ban_bolos, durchgefuehrte_kontrollen, time
 text_cooldowns = {}
 fullmute_timers = {}
 fullmute_warned = set()
+voice_join_times = {}
 
 xp_locks = {}
 active_xp_boost = None
@@ -194,6 +201,23 @@ def parse_duration(duration_str: str):
     units_text = {'m': 'Minute(n)', 'h': 'Stunde(n)', 'd': 'Tag(en)', 'w': 'Woche(n)'}
     seconds = val * multipliers[unit]
     return seconds, f"{val} {units_text[unit]}"
+
+
+async def log_xp_action(guild: discord.Guild, user: discord.Member, amount: int, source: str, details: str = ""):
+    kanal = guild.get_channel(XP_LOG_KANAL_ID)
+    if not kanal:
+        return
+    embed = discord.Embed(
+        title="📊 XP Log",
+        color=discord.Color.blue()
+    )
+    embed.add_field(name="👤 Benutzer", value=user.mention, inline=True)
+    embed.add_field(name="✨ Erhaltene XP", value=f"`+{amount} XP`", inline=True)
+    embed.add_field(name="📌 Art der XP", value=source, inline=False)
+    if details:
+        embed.add_field(name="📝 Details", value=details, inline=False)
+    embed.set_footer(text="Sirius RP • XP Logging")
+    await kanal.send(embed=embed)
 
 
 def add_xp(user_id: int, base_points: int) -> int:
@@ -279,7 +303,6 @@ class VerifyView(ui.View):
         member = interaction.user
         guild = interaction.guild
 
-        # Rollen abrufen
         verified_role = guild.get_role(VERIFIED_ROLLE_ID)
         unverified_role = guild.get_role(UNVERIFIED_ROLLE_ID)
 
@@ -287,16 +310,12 @@ class VerifyView(ui.View):
             await interaction.response.send_message("❌ Es gab ein Konfigurationsproblem mit den Rollen. Bitte kontaktiere das Team.", ephemeral=True)
             return
 
-        # Prüfen, ob der Nutzer bereits verifiziert ist bzw. die Verified-Rolle hat
         if verified_role in member.roles:
             await interaction.response.send_message("⚠️ Du bist bereits verifiziert und kannst diesen Prozess nicht erneut durchführen!", ephemeral=True)
             return
 
         try:
-            # Verified-Rolle hinzufügen
             await member.add_roles(verified_role, reason="Erfolgreich verifiziert")
-            
-            # Unverified-Rolle entfernen (falls vorhanden)
             if unverified_role in member.roles:
                 await member.remove_roles(unverified_role, reason="Verifizierung abgeschlossen")
 
@@ -598,15 +617,18 @@ class ModerationEintragModal(ui.Modal):
             moderation_eintraege[r_key] = []
         moderation_eintraege[r_key].append(eintrag)
 
+        is_new_ban_bolo = False
         if typ == "Ban Bolo":
             existing = any(b['roblox_name'].lower() == r_key for b in active_ban_bolos)
             if not existing:
-                active_ban_bolos.append({
+                is_new_ban_bolo = True
+                bolo_data = {
                     'roblox_name': r_name,
                     'warn_count': "Manuell",
                     'timestamp': time.time(),
                     'eintraege_kopie': list(moderation_eintraege[r_key])
-                })
+                }
+                active_ban_bolos.append(bolo_data)
             else:
                 for b in active_ban_bolos:
                     if b['roblox_name'].lower() == r_key:
@@ -617,14 +639,35 @@ class ModerationEintragModal(ui.Modal):
             if warn_count in [3, 6, 9]:
                 existing = any(b['roblox_name'].lower() == r_key for b in active_ban_bolos)
                 if not existing:
-                    active_ban_bolos.append({
+                    is_new_ban_bolo = True
+                    bolo_data = {
                         'roblox_name': r_name,
                         'warn_count': f"{warn_count} Warns",
                         'timestamp': time.time(),
                         'eintraege_kopie': list(moderation_eintraege[r_key])
-                    })
+                    }
+                    active_ban_bolos.append(bolo_data)
 
         save_data()
+
+        # Ban Bolo Log auslösen falls neu erstellt
+        if is_new_ban_bolo:
+            bolo_log_kanal = interaction.guild.get_channel(BAN_BOLO_LOG_KANAL_ID)
+            if bolo_log_kanal:
+                b_embed = discord.Embed(
+                    title=f"🚨 Neue Ban Bolo erstellt — {r_name}",
+                    description="Es wurde eine neue Ban Bolo im System hinterlegt.",
+                    color=discord.Color.red()
+                )
+                b_embed.add_field(name="👤 Roblox-Name", value=f"`{r_name}`", inline=True)
+                b_embed.add_field(name="⚠️ Auslöser", value=f"`{bolo_data['warn_count']}`", inline=True)
+                b_embed.add_field(name="🛡️ Erstellt von", value=interaction.user.mention, inline=False)
+                b_embed.set_footer(text="Sirius RP • Ban Bolo System")
+                avatar_url_check = get_roblox_avatar_url(r_name)
+                if avatar_url_check:
+                    b_embed.set_thumbnail(url=avatar_url_check)
+                await bolo_log_kanal.send(embed=b_embed)
+
         avatar_url = get_roblox_avatar_url(r_name)
 
         embed = discord.Embed(
@@ -794,6 +837,19 @@ class BanBoloAbschliessenView(ui.View):
         active_ban_bolos = [b for b in active_ban_bolos if b['roblox_name'].lower() != self.roblox_name.lower()]
         save_data()
 
+        # Ban Bolo Log für Akzeptieren/Abschließen senden
+        bolo_log_kanal = interaction.guild.get_channel(BAN_BOLO_LOG_KANAL_ID)
+        if bolo_log_kanal:
+            b_embed = discord.Embed(
+                title=f"✅ Ban Bolo akzeptiert & abgeschlossen — {self.roblox_name}",
+                description=f"Die Ban Bolo wurde von {interaction.user.mention} erfolgreich bearbeitet und abgeschlossen.",
+                color=discord.Color.green()
+            )
+            b_embed.add_field(name="👤 Roblox-Name", value=f"`{self.roblox_name}`", inline=True)
+            b_embed.add_field(name="🛡️ Bearbeitet von", value=interaction.user.mention, inline=True)
+            b_embed.set_footer(text="Sirius RP • Ban Bolo System")
+            await bolo_log_kanal.send(embed=b_embed)
+
         await interaction.followup.send(f"✅ Die Ban Bolo für **{self.roblox_name}** wurde erfolgreich abgeschlossen und entfernt.", ephemeral=True)
 
 
@@ -859,7 +915,15 @@ class FeedbackModal(ui.Modal, title="Dein Feedback"):
         sterne_emojis = "⭐" * self.sterne
 
         if is_team_member(self.target_member):
-            add_xp(self.target_member.id, xp_erhalten)
+            added = add_xp(self.target_member.id, xp_erhalten)
+            if added > 0:
+                await log_xp_action(
+                    interaction.guild,
+                    self.target_member,
+                    added,
+                    "Feedback XP",
+                    f"Erhaltenes Feedback von {interaction.user.mention} mit {sterne_emojis}"
+                )
             await refresh_leaderboard_in_channel()
 
         log_embed = discord.Embed(
@@ -941,9 +1005,12 @@ class StartFeedbackView(ui.View):
 
 
 class AdminAcceptView(ui.View):
-    def __init__(self, requester_user: discord.User = None):
+    def __init__(self, requester_user: discord.User = None, roblox_name: str = "", ort: str = "", grund: str = ""):
         super().__init__(timeout=None)
         self.requester_user = requester_user
+        self.roblox_name = roblox_name
+        self.ort = ort
+        self.grund = grund
         self.accepted = False
 
     @ui.button(label="Annehmen", style=discord.ButtonStyle.success, custom_id="accept_admin_call")
@@ -966,8 +1033,30 @@ class AdminAcceptView(ui.View):
         button.style = discord.ButtonStyle.secondary
         await interaction.message.edit(view=self)
 
-        add_xp(interaction.user.id, 10)
+        added = add_xp(interaction.user.id, 10)
+        if added > 0:
+            await log_xp_action(
+                interaction.guild,
+                interaction.user,
+                added,
+                "Call Admin XP",
+                f"Übernahme eines Admin-Calls von {self.requester_user.mention if self.requester_user else 'Unbekannt'}"
+            )
         await refresh_leaderboard_in_channel()
+
+        # Call Admin Log aktualisieren/senden
+        call_log_kanal = interaction.guild.get_channel(CALL_ADMIN_LOG_KANAL_ID)
+        if call_log_kanal:
+            log_accept_embed = discord.Embed(
+                title="📞 Admin-Call akzeptiert",
+                description=f"Der Admin-Call wurde von **{interaction.user.mention}** angenommen.",
+                color=discord.Color.green()
+            )
+            log_accept_embed.add_field(name="👤 Roblox-Name", value=f"`{self.roblox_name}`", inline=True)
+            log_accept_embed.add_field(name="📍 Ort", value=f"`{self.ort}`", inline=True)
+            log_accept_embed.add_field(name="🛡️ Bearbeitet von", value=interaction.user.mention, inline=False)
+            log_accept_embed.set_footer(text="Sirius RP • Call Admin Logs")
+            await call_log_kanal.send(embed=log_accept_embed)
 
         if self.requester_user:
             dm_embed = discord.Embed(
@@ -1010,8 +1099,25 @@ class CallAdminModal(ui.Modal, title="Admin Rufen"):
             if avatar_url:
                 admin_embed.set_thumbnail(url=avatar_url)
 
-            view = AdminAcceptView(requester_user=interaction.user)
-            await log_channel.send(content=f"<@&{CALL_ADMIN_TEAM_ROLLE_ID}>", embed=admin_embed, view=view)
+            view = AdminAcceptView(requester_user=interaction.user, roblox_name=self.roblox_name.value, ort=self.ort.value, grund=self.grund.value)
+            msg = await log_channel.send(content=f"<@&{CALL_ADMIN_TEAM_ROLLE_ID}>", embed=admin_embed, view=view)
+
+        # Call Admin Log für neue Erstellung senden
+        call_log_kanal = interaction.guild.get_channel(CALL_ADMIN_LOG_KANAL_ID)
+        if call_log_kanal:
+            c_log_embed = discord.Embed(
+                title="📞 Neuer Call Admin erstellt",
+                description="Ein neuer Admin-Call wurde eingereicht.",
+                color=discord.Color.orange()
+            )
+            c_log_embed.add_field(name="👤 Roblox-Name", value=f"`{self.roblox_name.value}`", inline=True)
+            c_log_embed.add_field(name="📍 Ort", value=f"`{self.ort.value}`", inline=True)
+            c_log_embed.add_field(name="📝 Grund", value=self.grund.value, inline=False)
+            c_log_embed.add_field(name="💬 Discord User", value=interaction.user.mention, inline=False)
+            c_log_embed.set_footer(text="Sirius RP • Call Admin Logs")
+            if avatar_url:
+                c_log_embed.set_thumbnail(url=avatar_url)
+            await call_log_kanal.send(embed=c_log_embed)
 
 
 class StartCallAdminView(ui.View):
@@ -1030,6 +1136,30 @@ class StartCallAdminView(ui.View):
 @bot.event
 async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
     guild = member.guild
+
+    # Sprachkanal-Verlassen-Logik für Voice-XP (wenn man Call verlässt)
+    if before.channel and before.channel.id in ALLOWED_VOICE_CHANNELS:
+        if not after.channel or after.channel.id not in ALLOWED_VOICE_CHANNELS:
+            join_info = voice_join_times.pop(member.id, None)
+            if join_info and is_team_member(member):
+                duration_seconds = int(time.time() - join_info)
+                minutes_in_call = duration_seconds // 60
+                if minutes_in_call > 0:
+                    earned = add_xp(member.id, minutes_in_call)
+                    if earned > 0:
+                        await log_xp_action(
+                            guild,
+                            member,
+                            earned,
+                            "Voice XP",
+                            f"Verlassen des Voice-Kanals `{before.channel.name}` nach `{minutes_in_call} Minuten`."
+                        )
+                        await refresh_leaderboard_in_channel()
+
+    # Sprachkanal-Beitreten-Logik
+    if after.channel and after.channel.id in ALLOWED_VOICE_CHANNELS:
+        if not before.channel or before.channel.id not in ALLOWED_VOICE_CHANNELS:
+            voice_join_times[member.id] = time.time()
 
     if after.channel and after.channel.id == BUERO_WARTERAUM_ID:
         if before.channel and before.channel.id == BUERO_WARTERAUM_ID:
@@ -1142,7 +1272,6 @@ async def check_expired_boosts():
 @tasks.loop(seconds=60)
 async def check_voice_xp():
     active_fullmute_users = set()
-    xp_changed = False
 
     for guild in bot.guilds:
         for channel_id in ALLOWED_VOICE_CHANNELS:
@@ -1169,9 +1298,8 @@ async def check_voice_xp():
                                 except discord.Forbidden:
                                     pass
                         else:
-                            added = add_xp(member.id, 1)
-                            if added > 0:
-                                xp_changed = True
+                            if member.id not in voice_join_times:
+                                voice_join_times[member.id] = time.time()
                             fullmute_timers.pop(member.id, None)
                             fullmute_warned.discard(member.id)
 
@@ -1179,9 +1307,6 @@ async def check_voice_xp():
         if user_id not in active_fullmute_users:
             fullmute_timers.pop(user_id, None)
             fullmute_warned.discard(user_id)
-
-    if xp_changed:
-        await refresh_leaderboard_in_channel()
 
 
 async def refresh_leaderboard_in_channel():
@@ -1219,7 +1344,7 @@ async def on_ready():
     bot.add_view(BueroMovenView())
     bot.add_view(BanBoloAbschliessenView())
     bot.add_view(TimeLeaderboardView())
-    bot.add_view(VerifyView()) # Persistente View für Verify hinzugefügt
+    bot.add_view(VerifyView())
 
     try:
         synced = await bot.tree.sync()
@@ -1252,7 +1377,15 @@ async def on_message(message: discord.Message):
         last_msg_time = text_cooldowns.get(user_id, 0)
         if current_time - last_msg_time >= 10:
             text_cooldowns[user_id] = current_time
-            add_xp(user_id, 5)
+            added = add_xp(user_id, 5)
+            if added > 0:
+                await log_xp_action(
+                    message.guild,
+                    message.author,
+                    added,
+                    "Nachrichten XP",
+                    f"Verfassen einer Nachricht in {message.channel.mention}"
+                )
             await refresh_leaderboard_in_channel()
 
     await bot.process_commands(message)
@@ -1276,6 +1409,7 @@ async def xp_add_cmd(interaction: discord.Interaction, user: discord.Member, amo
         return
 
     add_xp(user.id, amount)
+    await log_xp_action(interaction.guild, user, amount, "Manuell hinzugefügt", f"Hinzugefügt von {interaction.user.mention}")
     await refresh_leaderboard_in_channel()
     await interaction.response.send_message(f"✅ Dem Teammitglied {user.mention} wurden **+{amount} XP** hinzugefügt.", ephemeral=True)
 
@@ -1430,6 +1564,14 @@ async def dizzykontrolle(interaction: discord.Interaction, user: discord.Member)
     save_data()
 
     received_xp = add_xp(mod_id, 15)
+    if received_xp > 0:
+        await log_xp_action(
+            interaction.guild,
+            interaction.user,
+            received_xp,
+            "Dizzykontrolle XP",
+            f"Erfolgreiche Durchführung einer Dizzykontrolle an {user.mention}"
+        )
     await refresh_leaderboard_in_channel()
 
     boost_info = ""
@@ -1441,7 +1583,33 @@ async def dizzykontrolle(interaction: discord.Interaction, user: discord.Member)
         description=f"**Teammitglied:** {interaction.user.mention}\n**Kontrollierte Person:** {user.mention}\n\n🎁 **Belohnung:** `+{received_xp} XP`{boost_info}",
         color=discord.Color.green()
     )
-    await interaction.response.send_message(embed=embed)
+    
+    # Nachricht im Ursprungskanal senden und nach 1 Minute löschen
+    msg = await interaction.response.send_message(embed=embed)
+    try:
+        original_msg = await interaction.original_response()
+        await original_msg.delete(delay=60)
+    except Exception:
+        pass
+
+    # Log in den Dizzykontroll-Log Kanal senden und nach 1 Minute löschen
+    dizzy_log_kanal = interaction.guild.get_channel(DIZZY_LOG_KANAL_ID)
+    if dizzy_log_kanal:
+        log_embed = discord.Embed(
+            title="🔍 Dizzykontrolle Log",
+            description="Eine neue Dizzykontrolle wurde registriert.",
+            color=discord.Color.blue()
+        )
+        log_embed.add_field(name="🛡️ Teammitglied", value=interaction.user.mention, inline=True)
+        log_embed.add_field(name="👤 Kontrollierte Person", value=user.mention, inline=True)
+        log_embed.add_field(name="✨ Vergebene XP", value=f"`+{received_xp} XP`{boost_info}", inline=False)
+        log_embed.set_footer(text="Sirius RP • Dizzykontroll-System")
+
+        log_msg = await dizzy_log_kanal.send(embed=log_embed)
+        try:
+            await log_msg.delete(delay=60)
+        except Exception:
+            pass
 
 
 @bot.command()
@@ -1564,4 +1732,6 @@ async def setuptimeleaderboard(ctx):
     await ctx.send("✅ Zeitauswahl-Leaderboard Panel gesendet!")
 
 # Bot starten
-bot.run("DEIN_ECHTER_DISCORD_TOKEN_HIER_EINTRAGEN")
+import os
+
+bot.run(os.getenv("DISCORD_TOKEN"))
