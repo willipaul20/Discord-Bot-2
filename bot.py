@@ -25,6 +25,26 @@ async def send_private_protocol(leader_user: discord.User, protocol_content: str
         print("Fehler: Der Gesprächsleiter hat DMs deaktiviert.")
 
 
+async def send_moderation_log(guild: discord.Guild, action_type: str, roblox_name: str, grund: str, dauer: str, moderator: str, avatar_url: str = None):
+    """Sendet Moderations-Einträge zielgerichtet an den festgelegten Kanal (ID: 1527349831444729868)."""
+    kanal = guild.get_channel(1527349831444729868)
+    if not kanal:
+        return
+    embed = discord.Embed(
+        title=f"🚨 Moderations-Aktion: {action_type}",
+        color=discord.Color.red()
+    )
+    embed.add_field(name="👤 Roblox-Name", value=f"`{roblox_name}`", inline=True)
+    embed.add_field(name="📌 Typ", value=f"`{action_type}`", inline=True)
+    embed.add_field(name="⏳ Dauer", value=f"`{dauer}`", inline=True)
+    embed.add_field(name="📝 Grund", value=grund, inline=False)
+    embed.add_field(name="🛡️ Moderator", value=moderator, inline=False)
+    if avatar_url:
+        embed.set_thumbnail(url=avatar_url)
+    embed.set_footer(text="Sirius RP • Moderations-Log")
+    await kanal.send(embed=embed)
+
+
 # ==========================================
 # FLASK WEBSERVER FÜR KEEP-ALIVE
 # ==========================================
@@ -365,7 +385,7 @@ class EvaluationView(discord.ui.View):
         self.interviewer = interviewer
         self.applicant_str = applicant_str
         self.current_idx = 0
-        self.answers = {} # idx: {"points": int, "emoji": str, "note": str}
+        self.answers = {}
 
     def get_current_embed(self):
         q_data = QUESTIONS[self.current_idx]
@@ -434,12 +454,10 @@ class EvaluationView(discord.ui.View):
 
         status_text = "✅ BESTANDEN" if passed else "❌ NICHT BESTANDEN"
 
-        # Bewerber-Formatierung (Falls eine ID/Mention eingegeben wurde, wird er direkt verlinkt)
         applicant_display = self.applicant_str
         if self.applicant_str.isdigit():
             applicant_display = f"<@{self.applicant_str}>"
 
-        # Text-basiertes Format ohne Embed für einfaches Kopieren
         text_msg = (
             f"📄 **AUSWERTUNG BEWERBUNGSGESPRÄCH** 📄\n"
             f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -462,10 +480,8 @@ class EvaluationView(discord.ui.View):
         text_msg += f"📝 **FAZIT DES AUSBILDERS:**\n{fazit}\n"
         text_msg += f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
 
-        # Protokoll ausschließlich per DM an den Gesprächsleiter/Ausbilder senden
         await send_private_protocol(self.interviewer, text_msg)
 
-        # Bestätigungsnachricht am Ende der Interaktion
         await interaction.edit_original_response(
             content="✅ **Das Gespräch wurde erfolgreich ausgewertet und dir privat per DM zugestellt!**", 
             embed=None, 
@@ -868,19 +884,10 @@ class ModerationEintragModal(ui.Modal):
 
         avatar_url = get_roblox_avatar_url(r_name)
 
+        # Log an den zentralen Kanal (ID: 1527349831444729868) senden (Doppelerfassung bereinigt)
         await send_moderation_log(
             guild=interaction.guild,
-            action_type="Bann",
-            roblox_name=r_name,
-            grund=self.grund.value.strip(),
-            dauer=self.dauer.value.strip(),
-            moderator=interaction.user.mention,
-            avatar_url=avatar_url
-        )
-
-        await send_moderation_log(
-            guild=interaction.guild,
-            action_type="Bann",
+            action_type=typ,
             roblox_name=r_name,
             grund=self.grund.value.strip(),
             dauer=self.dauer.value.strip(),
@@ -1028,7 +1035,12 @@ class SetupEintragView(ui.View):
         if not is_team_member(interaction.user):
             await interaction.response.send_message("❌ Du hast keine Berechtigung, dieses Tool zu nutzen!", ephemeral=True)
             return
-        await interaction.response.send_message("Bitte wähle eine Option aus:", view=ModerationSelectView(), ephemeral=True)
+        
+        # FIX: Überprüfung auf bereits beantwortete Interaktionen zur Vermeidung von Fehler 40060
+        if interaction.response.is_done():
+            await interaction.followup.send("Bitte wähle eine Option aus:", view=ModerationSelectView(), ephemeral=True)
+        else:
+            await interaction.response.send_message("Bitte wähle eine Option aus:", view=ModerationSelectView(), ephemeral=True)
 
     @ui.button(label="Einträge abfragen", style=discord.ButtonStyle.secondary, emoji="🔍", custom_id="setup_search_btn")
     async def search_button(self, interaction: discord.Interaction, button: ui.Button):
@@ -1962,5 +1974,5 @@ async def setuptimeleaderboard(ctx):
     await ctx.send(embed=embed, view=TimeLeaderboardView())
     await ctx.send("✅ Zeitauswahl-Leaderboard Panel gesendet!")
 
-# Bot starten - TOKEN ANONYMISIERT FÜR PASSENDE BEREITSTELLUNG
+# Bot starten
 bot.run(os.getenv("DISCORD_TOKEN"))
