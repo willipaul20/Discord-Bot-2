@@ -134,7 +134,7 @@ QUESTIONS = [
     {"q": "Erkläre was FRP ist.", "max": 2},
     {"q": "Was bedeutet Combat Logging?", "max": 6},
     {"q": "Erkläre what du under RDM verstehst." if False else "Erkläre was du unter RDM verstehst.", "max": 2},
-    {"q": "Erkläre was Meta Gaming ist und was machst du wenn du jemanden erwischt.", "max": 8},
+    {"q": "Erkläre what du under Meta Gaming verstehst." if False else "Erkläre was du unter Meta Gaming bist und was machst du wenn du jemanden erwischt.", "max": 8},
     {"q": "Erkläre was du unter VDM verstehst.", "max": 2},
     {"q": "Wie viele Geiseln darfst du maximal nehmen und wie hoch darf das Lösegeld sein?", "max": 6},
     {"q": "Stell dir vor ein Cop stürmt in einer Geiselnahme, obwohl die Geiseln bedroht wurden. Was tust du?", "max": 6},
@@ -1075,10 +1075,14 @@ class SetupEintragView(ui.View):
             await interaction.response.send_message("❌ Du hast keine Berechtigung, dieses Tool zu nutzen!", ephemeral=True)
             return
         
-        if interaction.response.is_done():
-            await interaction.followup.send("Bitte wähle eine Option aus:", view=ModerationSelectView(), ephemeral=True)
-        else:
-            await interaction.response.send_message("Bitte wähle eine Option aus:", view=ModerationSelectView(), ephemeral=True)
+        # Hier korrigiert: Verwendung von defer/followup oder direkter response je nach Zustand
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send("Bitte wähle eine Option aus:", view=ModerationSelectView(), ephemeral=True)
+            else:
+                await interaction.response.send_message("Bitte wähle eine Option aus:", view=ModerationSelectView(), ephemeral=True)
+        except Exception:
+            pass
 
     @ui.button(label="Einträge abfragen", style=discord.ButtonStyle.secondary, emoji="🔍", custom_id="setup_search_btn")
     async def search_button(self, interaction: discord.Interaction, button: ui.Button):
