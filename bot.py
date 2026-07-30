@@ -5,7 +5,7 @@ import time
 import asyncio
 import requests
 from threading import Thread
-from Flask import Flask
+from flask import Flask
 
 import discord
 from discord.ext import commands, tasks
@@ -1611,6 +1611,12 @@ async def dizzykontrolle(interaction: discord.Interaction, user: discord.Member)
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def setupbewerbung(ctx):
+    # Chat-Befehl löschen für eine saubere Optik
+    try:
+        await ctx.message.delete()
+    except Exception:
+        pass
+
     embed = discord.Embed(
         title="📋 Bewerbung — Sirius RP",
         description=(
@@ -1621,6 +1627,7 @@ async def setupbewerbung(ctx):
     )
     embed.set_footer(text="Sirius RP • Bewerbungssystem")
 
+    # Sendet das Embed zusammen mit der BewerbungView (enthält den Protokoll-Button)
     await ctx.send(embed=embed, view=BewerbungView())
 
 
