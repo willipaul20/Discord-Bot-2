@@ -135,7 +135,7 @@ QUESTIONS = [
     {"q": "Was bedeutet Combat Logging?", "max": 6},
     {"q": "Erkläre what du under RDM verstehst." if False else "Erkläre was du unter RDM verstehst.", "max": 2},
     {"q": "Erkläre what du under Meta Gaming verstehst." if False else "Erkläre was du unter Meta Gaming bist und was machst du wenn du jemanden erwischt.", "max": 8},
-    {"q": "Erkläre was du unter VDM verstehst.", "max": 2},
+    {"q": "Erkläre what du under VDM verstehst." if False else "Erkläre was du unter VDM verstehst.", "max": 2},
     {"q": "Wie viele Geiseln darfst du maximal nehmen und wie hoch darf das Lösegeld sein?", "max": 6},
     {"q": "Stell dir vor ein Cop stürmt in einer Geiselnahme, obwohl die Geiseln bedroht wurden. Was tust du?", "max": 6},
     {"q": "Was sind unsere Savezonen?", "max": 4},
@@ -632,7 +632,7 @@ class BueroMovenView(ui.View):
         guild = interaction.guild
         waiting_member = guild.get_member(self.waiting_user_id)
         if not waiting_member or not waiting_member.voice or waiting_member.voice.channel is None:
-            await interaction.followup.send("❌ Die Person ist nicht mehr im Warteraum oder hat den Voice verlassen.", ephemeral=True)
+            await interaction.followup.send("❌ Die Person is nicht mehr im Warteraum oder hat den Voice verlassen.", ephemeral=True)
             return
 
         try:
@@ -1069,22 +1069,19 @@ class SetupEintragView(ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @ui.button(label="Moderate", style=discord.ButtonStyle.danger, emoji="🛡️", custom_id="setup_moderate_btn")
-    async def moderate_button(self, interaction: discord.Interaction, button: ui.Button):
+    @discord.ui.button(label="Moderate", style=discord.ButtonStyle.danger, emoji="🛡️", custom_id="setup_moderate_btn")
+    async def moderate_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not is_team_member(interaction.user):
             await interaction.response.send_message("❌ Du hast keine Berechtigung, dieses Tool zu nutzen!", ephemeral=True)
             return
         
-        # Hier korrigiert: Verwendung von defer/followup oder direkter response je nach Zustand
-        try:
-            if interaction.response.is_done():
-                await interaction.followup.send("Bitte wähle eine Option aus:", view=ModerationSelectView(), ephemeral=True)
-            else:
-                await interaction.response.send_message("Bitte wähle eine Option aus:", view=ModerationSelectView(), ephemeral=True)
-        except Exception:
-            pass
+        # Schritt 1: Interaktion sofort absichern (verhindert den Timeout-Fehler)[cite: 7]
+        await interaction.response.defer(ephemeral=True)
 
-    @ui.button(label="Einträge abfragen", style=discord.ButtonStyle.secondary, emoji="🔍", custom_id="setup_search_btn")
+        # Schritt 2: Danach die Nachricht mit der neuen View senden (hier als Followup, da defer genutzt wurde)[cite: 7]
+        await interaction.followup.send("Bitte wähle eine Option aus:", view=ModerationSelectView(), ephemeral=True)
+
+    @discord.ui.button(label="Einträge abfragen", style=discord.ButtonStyle.secondary, emoji="🔍", custom_id="setup_search_btn")
     async def search_button(self, interaction: discord.Interaction, button: ui.Button):
         if not is_team_member(interaction.user):
             await interaction.response.send_message("❌ Du hast keine Berechtigung, dieses Tool zu nutzen!", ephemeral=True)
@@ -1780,7 +1777,7 @@ async def xp_boost(interaction: discord.Interaction, percentage: int, duration: 
 async def xp_stats(interaction: discord.Interaction, user: discord.Member = None):
     target = user or interaction.user
     if not is_team_member(target):
-        await interaction.response.send_message("❌ Dieser Benutzer is kein Teammitglied.", ephemeral=True)
+        await interaction.response.send_message("❌ Dieser Benutzer ist kein Teammitglied.", ephemeral=True)
         return
 
     val = user_xp.get(target.id, 0)
