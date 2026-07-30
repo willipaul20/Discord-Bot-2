@@ -884,7 +884,6 @@ class ModerationEintragModal(ui.Modal):
 
         avatar_url = get_roblox_avatar_url(r_name)
 
-        # Log an den zentralen Kanal (ID: 1527349831444729868) senden (Doppelerfassung bereinigt)
         await send_moderation_log(
             guild=interaction.guild,
             action_type=typ,
@@ -977,10 +976,21 @@ class DeleteEintragSelect(ui.Select):
 
             save_data()
 
+            # Protokolliere die Löschung in den Moderations-Logs
+            await send_moderation_log(
+                guild=interaction.guild,
+                action_type=f"Löschung ({removed['typ']})",
+                roblox_name=self.r_name,
+                grund=f"Gelöschter Grund: {removed['grund']}",
+                dauer=removed['dauer'],
+                moderator=interaction.user.mention,
+                avatar_url=get_roblox_avatar_url(self.r_name)
+            )
+
             view = SearchResultView(r_name=self.r_name)
             embed = view.build_embed()
             await interaction.message.edit(embed=embed, view=view)
-            await interaction.followup.send(f"✅ Eintrag **#{idx+1} ({removed['typ']})** für **{self.r_name}** wurde erfolgreich entfernt.", ephemeral=True)
+            await interaction.followup.send(f"✅ Eintrag **#{idx+1} ({removed['typ']})** für **{self.r_name}** wurde erfolgreich entfernt und in den Logs festgehalten.", ephemeral=True)
         else:
             await interaction.followup.send("❌ Dieser Eintrag existiert nicht mehr.", ephemeral=True)
 
@@ -1012,14 +1022,36 @@ class SearchResultView(ui.View):
         if not eintraege:
             embed.add_field(name="ℹ️ Keine Einträge", value="Für diesen Spieler sind aktuell keine Einträge im System hinterlegt.", inline=False)
         else:
+            current_time = time.time()
             for i, e in enumerate(eintraege, start=1):
                 t_upper = e['typ'].upper()
                 badge = "🔴" if "BANN" in t_upper or "BOLO" in t_upper else "🟡" if "WARN" in t_upper else "🔵"
-                field_value = (
-                    f"• **Grund:** {e['grund']}\n"
-                    f"• **Dauer:** `{e['dauer']}`\n"
-                    f"• **Eingetragen von:** {e['mod']}"
-                )
+                
+                # Prüfen, ob die Dauer abgelaufen ist (nur bei Warns/Banns mit Zeitangabe)
+                is_expired = False
+                dauer_str = e['dauer'].strip().lower()
+                if dauer_str not in ["permanent", "perma", "unendlich", "lifetime"]:
+                    sec, _ = parse_duration(dauer_str)
+                    if sec is not None:
+                        if current_time >= (e['timestamp'] + sec):
+                            is_expired = True
+
+                # Formatierung mit Durchstreichung anwenden, falls abgelaufen
+                if is_expired:
+                    field_value = (
+                        f"~~• **Grund:** {e['grund']}~~\n"
+                        f"~~• **Dauer:** `{e['dauer']}` (Abgelaufen)~~_\n"
+                        f"~~• **Eingetragen von:** {e['mod']}~~\n"
+                        f"*(Status: Abgelaufen)*"
+                    )
+                    badge = "✅"
+                else:
+                    field_value = (
+                        f"• **Grund:** {e['grund']}\n"
+                        f"• **Dauer:** `{e['dauer']}`\n"
+                        f"• **Eingetragen von:** {e['mod']}"
+                    )
+
                 embed.add_field(name=f"{badge} Eintrag #{i} — [{t_upper}]", value=field_value, inline=False)
 
         embed.set_footer(text="Sirius RP • Moderations-Datenbank")
@@ -1036,7 +1068,6 @@ class SetupEintragView(ui.View):
             await interaction.response.send_message("❌ Du hast keine Berechtigung, dieses Tool zu nutzen!", ephemeral=True)
             return
         
-        # FIX: Überprüfung auf bereits beantwortete Interaktionen zur Vermeidung von Fehler 40060
         if interaction.response.is_done():
             await interaction.followup.send("Bitte wähle eine Option aus:", view=ModerationSelectView(), ephemeral=True)
         else:
