@@ -4,7 +4,6 @@ from threading import Thread
 
 app = Flask('')
 
-# Hier fügen wir methods=['GET', 'HEAD'] hinzu:
 @app.route('/', methods=['GET', 'HEAD'])
 def home():
     return "Bot is online!"
@@ -19,7 +18,7 @@ def keep_alive():
 
 if __name__ == "__main__":
     keep_alive()
-    # Hier startet dein Bot...
+    # Hier startet dein Discord-Bot...
 
 # Ab hier kommt dein normaler Bot-Code:
 import discord
