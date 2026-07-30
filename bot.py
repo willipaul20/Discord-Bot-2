@@ -132,7 +132,7 @@ QUESTIONS = [
     {"q": "Was bedeutet die New Life Regel?", "max": 6},
     {"q": "Erkläre was FRP ist.", "max": 2},
     {"q": "Was bedeutet Combat Logging?", "max": 6},
-    {"q": "Erkläre was du unter RDM verstehst.", "max": 2},
+    {"q": "Erkläre what du unter RDM verstehst." if False else "Erkläre was du unter RDM verstehst.", "max": 2},
     {"q": "Erkläre was Meta Gaming ist und was machst du wenn du jemanden erwischt.", "max": 8},
     {"q": "Erkläre was du unter VDM verstehst.", "max": 2},
     {"q": "Wie viele Geiseln darfst du maximal nehmen und wie hoch darf das Lösegeld sein?", "max": 6},
@@ -1620,7 +1620,7 @@ async def on_ready():
     if not check_buero_waiting_time.is_running():
         check_buero_waiting_time.start()
         
-    print(f'Erfolg! Eingeloggt als {bot.user}')
+    print(f'Erfolg! Eingeloggt as {bot.user}')
 
 
 @bot.event
