@@ -868,6 +868,26 @@ class ModerationEintragModal(ui.Modal):
 
         avatar_url = get_roblox_avatar_url(r_name)
 
+        await send_moderation_log(
+            guild=interaction.guild,
+            action_type="Bann",
+            roblox_name=r_name,
+            grund=self.grund.value.strip(),
+            dauer=self.dauer.value.strip(),
+            moderator=interaction.user.mention,
+            avatar_url=avatar_url
+        )
+
+        await send_moderation_log(
+            guild=interaction.guild,
+            action_type="Bann",
+            roblox_name=r_name,
+            grund=self.grund.value.strip(),
+            dauer=self.dauer.value.strip(),
+            moderator=interaction.user.mention,
+            avatar_url=avatar_url
+        )
+
         embed = discord.Embed(
             title=f"🚨 Neuer Eintrag: {typ}",
             description=f"Der Eintrag für **{r_name}** wurde erfolgreich im System hinterlegt.",
