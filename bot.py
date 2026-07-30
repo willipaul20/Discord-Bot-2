@@ -18,8 +18,6 @@ def keep_alive():
 
 if __name__ == "__main__":
     keep_alive()
-    # Hier startet dein Discord-Bot...
-
 from flask import Flask
 from threading import Thread
 import os
@@ -92,6 +90,11 @@ LEADERBOARD_KANAL_ID = 1532118592177569822
 XP_BOOST_ANNOUNCEMENT_KANAL_ID = 1527677485960007680
 EINTRAG_PANEL_KANAL_ID = 1532144498317070586
 BAN_BOLO_KANAL_ID = 1532144498317070586
+
+# Verify System IDs
+VERIFY_KANAL_ID = 1527404574430855340
+UNVERIFIED_ROLLE_ID = 1527404452829466735
+VERIFIED_ROLLE_ID = 1527349817586483229
 
 # ==========================================
 # DATENBANK & SPEICHER (MIT PERSISTENZ)
@@ -261,6 +264,47 @@ def get_roblox_avatar_url(username: str) -> str:
     except Exception as e:
         print(f"Fehler beim Abrufen des Roblox-Avatars: {e}")
     return None
+
+
+# ==========================================
+# VERIFY UI-KOMPONENTEN
+# ==========================================
+
+class VerifyView(ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @ui.button(label="✅ Verifizieren", style=discord.ButtonStyle.success, custom_id="verify_button_click")
+    async def verify_button(self, interaction: discord.Interaction, button: ui.Button):
+        member = interaction.user
+        guild = interaction.guild
+
+        # Rollen abrufen
+        verified_role = guild.get_role(VERIFIED_ROLLE_ID)
+        unverified_role = guild.get_role(UNVERIFIED_ROLLE_ID)
+
+        if not verified_role or not unverified_role:
+            await interaction.response.send_message("❌ Es gab ein Konfigurationsproblem mit den Rollen. Bitte kontaktiere das Team.", ephemeral=True)
+            return
+
+        # Prüfen, ob der Nutzer bereits verifiziert ist bzw. die Verified-Rolle hat
+        if verified_role in member.roles:
+            await interaction.response.send_message("⚠️ Du bist bereits verifiziert und kannst diesen Prozess nicht erneut durchführen!", ephemeral=True)
+            return
+
+        try:
+            # Verified-Rolle hinzufügen
+            await member.add_roles(verified_role, reason="Erfolgreich verifiziert")
+            
+            # Unverified-Rolle entfernen (falls vorhanden)
+            if unverified_role in member.roles:
+                await member.remove_roles(unverified_role, reason="Verifizierung abgeschlossen")
+
+            await interaction.response.send_message("🎉 Du hast dich erfolgreich verifiziert! Viel Spaß auf dem Server.", ephemeral=True)
+        except discord.Forbidden:
+            await interaction.response.send_message("❌ Mir fehlen die Berechtigungen, um dir deine Rollen zuzuweisen.", ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Ein unerwarteter Fehler ist aufgetreten: {e}", ephemeral=True)
 
 
 # ==========================================
@@ -1175,6 +1219,7 @@ async def on_ready():
     bot.add_view(BueroMovenView())
     bot.add_view(BanBoloAbschliessenView())
     bot.add_view(TimeLeaderboardView())
+    bot.add_view(VerifyView()) # Persistente View für Verify hinzugefügt
 
     try:
         synced = await bot.tree.sync()
@@ -1401,6 +1446,35 @@ async def dizzykontrolle(interaction: discord.Interaction, user: discord.Member)
 
 @bot.command()
 @commands.has_permissions(administrator=True)
+async def setupverify(ctx):
+    kanal = bot.get_channel(VERIFY_KANAL_ID)
+    if not kanal:
+        await ctx.send("❌ Verify-Kanal wurde nicht gefunden!")
+        return
+
+    embed = discord.Embed(
+        title="🔐 Server-Verifizierung • Sirius RP",
+        description=(
+            "Herzlich willkommen auf **Sirius RP**! 🛡️\n\n"
+            "Um vollen Zugriff auf alle Kanäle, Kategorien und Funktionen unseres Servers zu erhalten, "
+            "musst du dich kurz verifizieren.\n\n"
+            "**Was ist die Verifizierung?**\n"
+            "Die Verifizierung dient als Schutz vor Bots, Spam und ungebetenen Gästen. Sie stellt sicher, "
+            "dass du ein echter Community-Mitglied bist.\n\n"
+            "**Wie funktioniert es?**\n"
+            "Klicke einfach auf den unteren Button (**\"Verifizieren\"**). Dadurch wird dir automatisch "
+            "die verifizierte Rolle zugewiesen und die unvoreingenommene Einstiegsrolle entfernt."
+        ),
+        color=discord.Color.blue()
+    )
+    embed.set_footer(text="Sirius RP • Sicherheitssystem")
+
+    await kanal.send(embed=embed, view=VerifyView())
+    await ctx.send("✅ Verify-Panel erfolgreich im Zielkanal gesendet!")
+
+
+@bot.command()
+@commands.has_permissions(administrator=True)
 async def setupeintrag(ctx):
     kanal = bot.get_channel(EINTRAG_PANEL_KANAL_ID)
     if not kanal:
@@ -1490,4 +1564,4 @@ async def setuptimeleaderboard(ctx):
     await ctx.send("✅ Zeitauswahl-Leaderboard Panel gesendet!")
 
 # Bot starten
-bot.run(os.environ.get("DISCORD_TOKEN"))
+bot.run(os.environ.get("DISCORD_BOT_TOKEN"))
