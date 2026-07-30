@@ -5,7 +5,7 @@ import time
 import asyncio
 import requests
 from threading import Thread
-from flask import Flask
+from Flask import Flask
 
 import discord
 from discord.ext import commands, tasks
@@ -43,7 +43,7 @@ intents.reactions = True
 bot = commands.Bot(command_prefix='!', intents=intents)
 
 # ==========================================
-# KONFIGURATION (IDS)
+# KONFIGURATION (IDS & LINKS)
 # ==========================================
 TEAM_ROLLE_ID = 1527349817708122189
 
@@ -87,6 +87,9 @@ CALL_ADMIN_LOG_KANAL_ID = 1532348723705811016
 VERIFY_KANAL_ID = 1527404574430855340
 UNVERIFIED_ROLLE_ID = 1527404452829466735
 VERIFIED_ROLLE_ID = 1527349817586483229
+
+# LINK FÜR DIE BEWERBUNG (PROTOKOLL)
+BEWERBUNG_LINK = "https://google.com"  # 👈 Hier deinen Formular-/Protokoll-Link eintragen!
 
 # ==========================================
 # DATENBANK & SPEICHER (MIT PERSISTENZ)
@@ -274,6 +277,17 @@ def get_roblox_avatar_url(username: str) -> str:
     except Exception as e:
         print(f"Fehler beim Abrufen des Roblox-Avatars: {e}")
     return None
+
+
+# ==========================================
+# BEWERBUNG UI-KOMPONENTE
+# ==========================================
+
+class BewerbungView(ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        # Direkt ein Link-Button, der zum Protokoll/Formular führt
+        self.add_item(ui.Button(label="📝 Zum Bewerbungsprotokoll", url=BEWERBUNG_LINK, style=discord.ButtonStyle.link))
 
 
 # ==========================================
@@ -1328,6 +1342,7 @@ async def on_ready():
     bot.add_view(BanBoloAbschliessenView())
     bot.add_view(TimeLeaderboardView())
     bot.add_view(VerifyView())
+    bot.add_view(BewerbungView())
 
     try:
         synced = await bot.tree.sync()
@@ -1591,6 +1606,22 @@ async def dizzykontrolle(interaction: discord.Interaction, user: discord.Member)
             await log_msg.delete(delay=60)
         except Exception:
             pass
+
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def setupbewerbung(ctx):
+    embed = discord.Embed(
+        title="📋 Bewerbung — Sirius RP",
+        description=(
+            "Möchtest du Teil unseres Teams werden oder dich auf eine bestimmte Stelle bewerben?\n\n"
+            "Klicke einfach auf den unteren Button, um direkt zum Bewerbungsprotokoll zu gelangen."
+        ),
+        color=discord.Color.blue()
+    )
+    embed.set_footer(text="Sirius RP • Bewerbungssystem")
+
+    await ctx.send(embed=embed, view=BewerbungView())
 
 
 @bot.command()
