@@ -12,6 +12,20 @@ from discord.ext import commands, tasks
 from discord import app_commands, ui
 
 # ==========================================
+# HELPER FUNCTIONS
+# ==========================================
+async def send_private_protocol(leader_user: discord.User, protocol_content: str):
+    """Sendet das fertig gestellte Protokoll privat per DM an den Gesprächsleiter[cite: 7]."""
+    try:
+        await leader_user.send(
+            f"📋 **Hier ist das Protokoll deiner letzten Sitzung:**\n\n{protocol_content}"
+        )
+        print("Protokoll erfolgreich privat zugestellt.")
+    except discord.Forbidden:
+        print("Fehler: Der Gesprächsleiter hat DMs deaktiviert.")
+
+
+# ==========================================
 # FLASK WEBSERVER FÜR KEEP-ALIVE
 # ==========================================
 app = Flask('')
@@ -423,11 +437,16 @@ class EvaluationView(discord.ui.View):
         
         status_text = "✅ BESTANDEN" if passed else "❌ NICHT BESTANDEN"
 
+        # Bewerber-Formatierung (Falls eine ID/Mention eingegeben wurde, wird er direkt verlinkt)
+        applicant_display = self.applicant_str
+        if self.applicant_str.isdigit():
+            applicant_display = f"<@{self.applicant_str}>"
+
         # Text-basiertes Format ohne Embed für einfaches Kopieren
         text_msg = (
             f"📄 **AUSWERTUNG BEWERBUNGSGESPRÄCH** 📄\n"
             f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"👤 **Bewerber:** {self.applicant_str}\n"
+            f"👤 **Bewerber:** {applicant_display}\n"
             f"🛡️ **Ausbilder:** {self.interviewer.mention}\n"
             f"📊 **Ergebnis:** {total_points} / {MAX_SCORE} Punkte ({status_text})\n"
             f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
@@ -446,16 +465,20 @@ class EvaluationView(discord.ui.View):
         text_msg += f"📝 **FAZIT DES AUSBILDERS:**\n{fazit}\n"
         text_msg += f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
 
+        # 1. Protokoll privat per DM an den Ausbilder senden[cite: 7]
+        await send_private_protocol(self.interviewer, text_msg)
+
+        # 2. Protokoll im Log-Kanal veröffentlichen
         if log_channel:
             await log_channel.send(content=text_msg)
             await interaction.edit_original_response(
-                content="✅ **Das Gespräch wurde erfolgreich protokolliert und (ohne Embed) abgespeichert!**", 
+                content="✅ **Das Gespräch wurde erfolgreich protokolliert, (ohne Embed) abgespeichert und dir per DM zugestellt!**", 
                 embed=None, 
                 view=None
             )
         else:
             await interaction.edit_original_response(
-                content="❌ Fehler: Protokoll-Kanal konnte nicht gefunden werden!", 
+                content="❌ Fehler: Protokoll-Kanal konnte nicht gefunden werden! (Das Protokoll wurde dir dennoch per DM zugestellt)", 
                 embed=None, 
                 view=None
             )
