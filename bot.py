@@ -375,7 +375,7 @@ class EvaluationView(discord.ui.View):
     async def btn_green(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.save_answer(interaction, 1.0, "🟢")
 
-    @discord.ui.button(label="50%", style=discord.ButtonStyle.warning, emoji="🟡")
+    @discord.ui.button(label="50%", style=discord.ButtonStyle.secondary, emoji="🟡")
     async def btn_yellow(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.save_answer(interaction, 0.5, "🟡")
 
@@ -421,38 +421,44 @@ class EvaluationView(discord.ui.View):
 
         log_channel = bot.get_channel(LOG_CHANNEL_ID)
         
-        color = discord.Color.green() if passed else discord.Color.red()
-        status_text = "✅ **BESTANDEN**" if passed else "❌ **NICHT BESTANDEN**"
+        status_text = "✅ BESTANDEN" if passed else "❌ NICHT BESTANDEN"
 
-        embed = discord.Embed(
-            title="📄 Auswertung Bewerbungsgespräch",
-            color=color
+        # Text-basiertes Format ohne Embed für einfaches Kopieren
+        text_msg = (
+            f"📄 **AUSWERTUNG BEWERBUNGSGESPRÄCH** 📄\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"👤 **Bewerber:** {self.applicant_str}\n"
+            f"🛡️ **Ausbilder:** {self.interviewer.mention}\n"
+            f"📊 **Ergebnis:** {total_points} / {MAX_SCORE} Punkte ({status_text})\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"**__EINZELBEWERTUNG__**\n"
         )
-        
-        embed.add_field(name="👤 Bewerber", value=self.applicant_str, inline=True)
-        embed.add_field(name="🛡️ Ausbilder", value=self.interviewer.mention, inline=True)
-        embed.add_field(name="📊 Ergebnis", value=f"**{total_points} / {MAX_SCORE} Punkte**\nStatus: {status_text}", inline=False)
 
         for i, q in enumerate(QUESTIONS):
             ans = self.answers.get(i, {"emoji": "⚪", "points": 0, "note": ""})
-            val = f"Bewertung: {ans['emoji']} (**{ans['points']} / {q['max']} Pkt.**)"
+            text_msg += f"**{i+1}. {q['q']}**\n"
+            text_msg += f"└ Bewertung: {ans['emoji']} ({ans['points']} / {q['max']} Pkt.)\n"
             if ans["note"]:
-                val += f"\n*Anmerkung:* {ans['note']}"
-            
-            embed.add_field(
-                name=f"{i+1}. {q['q']}",
-                value=val,
-                inline=False
-            )
+                text_msg += f"└ *Anmerkung:* {ans['note']}\n"
+            text_msg += "\n"
 
-        embed.add_field(name="📝 Fazit des Ausbilders", value=fazit, inline=False)
-        embed.set_footer(text="Protokoll generiert am • Sirius Roleplay")
+        text_msg += f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        text_msg += f"📝 **FAZIT DES AUSBILDERS:**\n{fazit}\n"
+        text_msg += f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
 
         if log_channel:
-            await log_channel.send(content=f"Neues Bewerbungsprotokoll für {self.applicant_str}:", embed=embed)
-            await interaction.edit_original_response(content="✅ **Das Gespräch wurde erfolgreich protokolliert und abgespeichert!**", embed=None, view=None)
+            await log_channel.send(content=text_msg)
+            await interaction.edit_original_response(
+                content="✅ **Das Gespräch wurde erfolgreich protokolliert und (ohne Embed) abgespeichert!**", 
+                embed=None, 
+                view=None
+            )
         else:
-            await interaction.edit_original_response(content="❌ Fehler: Protokoll-Kanal konnte nicht gefunden werden!", embed=None, view=None)
+            await interaction.edit_original_response(
+                content="❌ Fehler: Protokoll-Kanal konnte nicht gefunden werden!", 
+                embed=None, 
+                view=None
+            )
 
 
 class StartBewerbungView(discord.ui.View):
@@ -1924,5 +1930,5 @@ async def setuptimeleaderboard(ctx):
     await ctx.send(embed=embed, view=TimeLeaderboardView())
     await ctx.send("✅ Zeitauswahl-Leaderboard Panel gesendet!")
 
-# Bot starten
+# Bot starten - TOKEN ANONYMISIERT FÜR PASSENDE BEREITSTELLUNG
 bot.run(os.getenv("DISCORD_TOKEN"))
