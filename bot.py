@@ -133,9 +133,9 @@ QUESTIONS = [
     {"q": "Was bedeutet die New Life Regel?", "max": 6},
     {"q": "Erkläre was FRP ist.", "max": 2},
     {"q": "Was bedeutet Combat Logging?", "max": 6},
-    {"q": "Erkläre what du under RDM verstehst." if False else "Erkläre was du unter RDM verstehst.", "max": 2},
-    {"q": "Erkläre what du under Meta Gaming verstehst." if False else "Erkläre was du unter Meta Gaming bist und was machst du wenn du jemanden erwischt.", "max": 8},
-    {"q": "Erkläre what du under VDM verstehst." if False else "Erkläre was du unter VDM verstehst.", "max": 2},
+    {"q": "Erkläre was du unter RDM verstehst.", "max": 2},
+    {"q": "Erkläre was du unter Meta Gaming verstehst und was machst du wenn du jemanden erwischt.", "max": 8},
+    {"q": "Erkläre was du unter VDM verstehst.", "max": 2},
     {"q": "Wie viele Geiseln darfst du maximal nehmen und wie hoch darf das Lösegeld sein?", "max": 6},
     {"q": "Stell dir vor ein Cop stürmt in einer Geiselnahme, obwohl die Geiseln bedroht wurden. Was tust du?", "max": 6},
     {"q": "Was sind unsere Savezonen?", "max": 4},
@@ -158,7 +158,6 @@ def load_data():
                 raw_dizzy = data.get("durchgefuehrte_kontrollen", [])
                 loaded_dizzy = {(int(item[0]), int(item[1])) for item in raw_dizzy}
 
-                # Sicherstellen, dass Keys in moderation_eintraege lowercase sind
                 raw_mod = data.get("moderation_eintraege", {})
                 loaded_mod = {k.lower(): v for k, v in raw_mod.items()}
 
@@ -636,7 +635,7 @@ class BueroMovenView(ui.View):
         guild = interaction.guild
         waiting_member = guild.get_member(self.waiting_user_id)
         if not waiting_member or not waiting_member.voice or waiting_member.voice.channel is None:
-            await interaction.followup.send("❌ Die Person is nicht mehr im Warteraum oder hat den Voice verlassen.", ephemeral=True)
+            await interaction.followup.send("❌ Die Person ist nicht mehr im Warteraum oder hat den Voice verlassen.", ephemeral=True)
             return
 
         try:
@@ -981,7 +980,6 @@ class DeleteEintragSelect(ui.Select):
 
             save_data()
 
-            # Protokolliere die Löschung in den Moderations-Logs
             await send_moderation_log(
                 guild=interaction.guild,
                 action_type=f"Löschung ({removed['typ']})",
@@ -1907,8 +1905,8 @@ async def setupverify(ctx):
             "Um vollen Zugriff auf alle Kanäle, Kategorien und Funktionen unseres Servers zu erhalten, "
             "musst du dich kurz verifizieren.\n\n"
             "**Was ist die Verifizierung?**\n"
-            "Die Verifizierung dient als Schutz vor Bots, Spam und ungebetenen Gäste. Sie stellt sicher, "
-            "dass du ein echter Community-Mitglied bist.\n\n"
+            "Die Verifizierung dient als Schutz vor Bots, Spam und ungebetenen Gästen. Sie stellt sicher, "
+            "dass du ein echtes Community-Mitglied bist.\n\n"
             "**Wie funktioniert es?**\n"
             "Klicke einfach auf den unteren Button (**\"Verifizieren\"**). Dadurch wird dir automatisch "
             "die verifizierte Rolle zugewiesen und die unvoreingenommene Einstiegsrolle entfernt."
