@@ -15,7 +15,7 @@ from discord import app_commands, ui
 # HELPER FUNCTIONS
 # ==========================================
 async def send_private_protocol(leader_user: discord.User, protocol_content: str):
-    """Sendet das fertig gestellte Protokoll privat per DM an den Gesprächsleiter[cite: 7]."""
+    """Sendet das fertig gestellte Protokoll privat per DM an den Gesprächsleiter."""
     try:
         await leader_user.send(
             f"📋 **Hier ist das Protokoll deiner letzten Sitzung:**\n\n{protocol_content}"
@@ -104,7 +104,6 @@ VERIFIED_ROLLE_ID = 1527349817586483229
 
 # BEWERBUNG SYSTEM KONFIGURATION
 ALLOWED_ROLES = [1527349818031214718, 1528123954659590154]
-LOG_CHANNEL_ID = 1532404153815662753
 PASS_SCORE = 35
 MAX_SCORE = 54
 
@@ -433,8 +432,6 @@ class EvaluationView(discord.ui.View):
         total_points = sum(ans["points"] for ans in self.answers.values())
         passed = total_points >= PASS_SCORE
 
-        log_channel = bot.get_channel(LOG_CHANNEL_ID)
-        
         status_text = "✅ BESTANDEN" if passed else "❌ NICHT BESTANDEN"
 
         # Bewerber-Formatierung (Falls eine ID/Mention eingegeben wurde, wird er direkt verlinkt)
@@ -465,23 +462,15 @@ class EvaluationView(discord.ui.View):
         text_msg += f"📝 **FAZIT DES AUSBILDERS:**\n{fazit}\n"
         text_msg += f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
 
-        # 1. Protokoll privat per DM an den Ausbilder senden[cite: 7]
+        # Protokoll ausschließlich per DM an den Gesprächsleiter/Ausbilder senden
         await send_private_protocol(self.interviewer, text_msg)
 
-        # 2. Protokoll im Log-Kanal veröffentlichen
-        if log_channel:
-            await log_channel.send(content=text_msg)
-            await interaction.edit_original_response(
-                content="✅ **Das Gespräch wurde erfolgreich protokolliert, (ohne Embed) abgespeichert und dir per DM zugestellt!**", 
-                embed=None, 
-                view=None
-            )
-        else:
-            await interaction.edit_original_response(
-                content="❌ Fehler: Protokoll-Kanal konnte nicht gefunden werden! (Das Protokoll wurde dir dennoch per DM zugestellt)", 
-                embed=None, 
-                view=None
-            )
+        # Bestätigungsnachricht am Ende der Interaktion
+        await interaction.edit_original_response(
+            content="✅ **Das Gespräch wurde erfolgreich ausgewertet und dir privat per DM zugestellt!**", 
+            embed=None, 
+            view=None
+        )
 
 
 class StartBewerbungView(discord.ui.View):
