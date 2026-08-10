@@ -135,7 +135,7 @@ QUESTIONS = [
     {"q": "Was bedeutet Combat Logging?", "max": 6},
     {"q": "Erkläre what du under RDM verstehst.", "max": 2},
     {"q": "Erkläre was du unter Meta Gaming verstehst und was machst du wenn du jemanden erwischt.", "max": 8},
-    {"q": "Erkläre was du unter VDM verstehst.", "max": 2},
+    {"q": "Erkläre what du under VDM verstehst.", "max": 2},
     {"q": "Wie viele Geiseln darfst du maximal nehmen und wie hoch darf das Lösegeld sein?", "max": 6},
     {"q": "Stell dir vor ein Cop stürmt in einer Geiselnahme, obwohl die Geiseln bedroht wurden. Was tust du?", "max": 6},
     {"q": "Was sind unsere Savezonen?", "max": 4},
@@ -937,7 +937,7 @@ class ModerationEintragModal(ui.Modal):
         embed.add_field(name="📌 Typ", value=f"`{typ}`", inline=True)
         embed.add_field(name="⏳ Dauer", value=f"`{dauer_val}`", inline=True)
         embed.add_field(name="📝 Grund", value=self.grund.value.strip(), inline=False)
-        embed.set_footer(text=f"Eingetragen von {interaction.user.display_name} • Emergency Hamburg")
+        embed.set_footer(text=f"Eingetragen von {interaction.user.display_name} • Sirius RP")
 
         if avatar_url:
             embed.set_thumbnail(url=avatar_url)
@@ -1182,7 +1182,7 @@ class BanBoloMainView(ui.View):
                 )
                 embed.add_field(name=f"📄 Historien-Eintrag #{i}", value=det, inline=False)
 
-            embed.set_footer(text="Sirius RP • Emergency Hamburg Sicherheitssystem")
+            embed.set_footer(text="Sirius RP • Sicherheitssystem")
             view = BanBoloAbschliessenView(roblox_name=r_name)
             await interaction.followup.send(embed=embed, view=view, ephemeral=True)
 
