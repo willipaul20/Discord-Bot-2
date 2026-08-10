@@ -133,7 +133,7 @@ QUESTIONS = [
     {"q": "Was bedeutet die New Life Regel?", "max": 6},
     {"q": "Erkläre was FRP ist.", "max": 2},
     {"q": "Was bedeutet Combat Logging?", "max": 6},
-    {"q": "Erkläre was du unter RDM verstehst.", "max": 2},
+    {"q": "Erkläre what du unter RDM verstehst.", "max": 2},
     {"q": "Erkläre was du unter Meta Gaming verstehst und was machst du wenn du jemanden erwischt.", "max": 8},
     {"q": "Erkläre was du unter VDM verstehst.", "max": 2},
     {"q": "Wie viele Geiseln darfst du maximal nehmen und wie hoch darf das Lösegeld sein?", "max": 6},
@@ -255,10 +255,24 @@ async def log_xp_action(guild: discord.Guild, user: discord.Member, amount: int,
         color=discord.Color.blue()
     )
     embed.add_field(name="👤 Benutzer", value=user.mention, inline=True)
-    embed.add_field(name="✨ Erhaltene XP", value=f"`+{amount} XP`", inline=True)
+    embed.add_field(name="✨ Erhaltene/Geänderte XP", value=f"`{amount} XP`", inline=True)
     embed.add_field(name="📌 Art der XP", value=source, inline=False)
     if details:
         embed.add_field(name="📝 Details", value=details, inline=False)
+    embed.set_footer(text="Sirius RP • XP Logging")
+    await kanal.send(embed=embed)
+
+
+async def log_xp_general_action(guild: discord.Guild, action_title: str, description: str):
+    """Loggt allgemeine XP-Befehle (Locks, Boosts, Stops) in den XP-Log Kanal."""
+    kanal = guild.get_channel(XP_LOG_KANAL_ID)
+    if not kanal:
+        return
+    embed = discord.Embed(
+        title=f"📊 XP Log: {action_title}",
+        description=description,
+        color=discord.Color.gold()
+    )
     embed.set_footer(text="Sirius RP • XP Logging")
     await kanal.send(embed=embed)
 
@@ -351,8 +365,9 @@ class StartModal(discord.ui.Modal, title="Bewerbungsgespräch Starten"):
 
 
 class NoteModal(discord.ui.Modal, title="Notiz zur Frage hinzufügen"):
-    def __init__(self, current_note=""):
+    def __init__(self, eval_view, current_note=""):
         super().__init__()
+        self.eval_view = eval_view
         self.note_input = discord.ui.TextInput(
             label="Anmerkung / Notiz",
             style=discord.TextStyle.paragraph,
@@ -363,7 +378,13 @@ class NoteModal(discord.ui.Modal, title="Notiz zur Frage hinzufügen"):
         self.add_item(self.note_input)
 
     async def on_submit(self, interaction: discord.Interaction):
-        await interaction.response.defer()
+        current_idx = self.eval_view.current_idx
+        if current_idx not in self.eval_view.answers:
+            self.eval_view.answers[current_idx] = {"points": 0, "emoji": "❌ Nicht bewertet", "note": self.note_input.value}
+        else:
+            self.eval_view.answers[current_idx]["note"] = self.note_input.value
+            
+        await interaction.response.edit_message(embed=self.eval_view.get_current_embed(), view=self.eval_view)
 
 
 class FazitModal(discord.ui.Modal, title="Abschluss & Fazit"):
@@ -423,16 +444,8 @@ class EvaluationView(discord.ui.View):
     @discord.ui.button(label="📝 Notiz hinzufügen/ändern", style=discord.ButtonStyle.secondary, row=1)
     async def btn_note(self, interaction: discord.Interaction, button: discord.ui.Button):
         current_note = self.answers.get(self.current_idx, {}).get("note", "")
-        modal = NoteModal(current_note=current_note)
+        modal = NoteModal(self, current_note=current_note)
         await interaction.response.send_modal(modal)
-        await modal.wait()
-        
-        if self.current_idx not in self.answers:
-            self.answers[self.current_idx] = {"points": 0, "emoji": "❌ Nicht bewertet", "note": modal.note_input.value}
-        else:
-            self.answers[self.current_idx]["note"] = modal.note_input.value
-            
-        await interaction.edit_original_response(embed=self.get_current_embed(), view=self)
 
     async def save_answer(self, interaction: discord.Interaction, multiplier: float, emoji: str):
         max_p = QUESTIONS[self.current_idx]["max"]
@@ -1261,7 +1274,7 @@ class StartFeedbackView(ui.View):
         super().__init__(timeout=None)
 
     @ui.button(label="Feedback geben", style=discord.ButtonStyle.primary, emoji="⭐", custom_id="start_feedback_btn")
-    async def start_feedback(self, interaction: discord.Interaction, button: ui.Button):
+    async def start_feedback(self, interaction: discord.Interaction, button: discord.ui.Button):
         if is_team_member(interaction.user):
             await interaction.response.send_message("❌ Teammitglieder dürfen kein Feedback abgeben!", ephemeral=True)
             return
@@ -1278,7 +1291,7 @@ class AdminAcceptView(ui.View):
         self.accepted = False
 
     @ui.button(label="Annehmen", style=discord.ButtonStyle.success, custom_id="accept_admin_call")
-    async def accept_call(self, interaction: discord.Interaction, button: ui.Button):
+    async def accept_call(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
 
         if not is_team_member(interaction.user):
@@ -1522,11 +1535,16 @@ async def check_expired_boosts():
     if active_xp_boost and time.time() >= active_xp_boost['end_timestamp']:
         boost_channel = bot.get_channel(XP_BOOST_ANNOUNCEMENT_KANAL_ID)
         if boost_channel:
-            text = (
-                "# Der XP Boost ist beendet.\n"
-                "-# Wer den Xp Boost beendet hat: Die normale Zeit ist abgelaufen."
+            embed = discord.Embed(
+                title="# XP Boost deaktiviert 😑",
+                description=(
+                    "**Der aktuelle XP Boost wurde deaktiviert!**\n\n"
+                    "-# XP Boost gestoppt von: @Normal abgelaufen"
+                ),
+                color=discord.Color.red()
             )
-            await boost_channel.send(content=text)
+            await boost_channel.send(embed=embed)
+            await log_xp_general_action(boost_channel.guild, "XP Boost abgelaufen", "Der aktive XP-Boost ist regulär abgelaufen.")
         active_xp_boost = None
 
 
@@ -1672,6 +1690,7 @@ async def xp_add_cmd(interaction: discord.Interaction, user: discord.Member, amo
 
     add_xp(user.id, amount)
     await log_xp_action(interaction.guild, user, amount, "Manuell hinzugefügt", f"Hinzugefügt von {interaction.user.mention}")
+    await log_xp_general_action(interaction.guild, "XP Hinzugefügt", f"Teammitglied {user.mention} hat `+{amount} XP` von {interaction.user.mention} erhalten.")
     await refresh_leaderboard_in_channel()
     await interaction.response.send_message(f"✅ Dem Teammitglied {user.mention} wurden **+{amount} XP** hinzugefügt.", ephemeral=True)
 
@@ -1690,13 +1709,15 @@ async def xp_remove(interaction: discord.Interaction, user: discord.Member, amou
     new_val = max(0, current - amount)
     user_xp[user.id] = new_val
     save_data()
+    await log_xp_action(interaction.guild, user, -amount, "Manuell entfernt", f"Entfernt von {interaction.user.mention}")
+    await log_xp_general_action(interaction.guild, "XP Entfernt", f"Teammitglied {user.mention} wurden `{amount} XP` von {interaction.user.mention} abgezogen.")
     await refresh_leaderboard_in_channel()
     await interaction.response.send_message(f"✅ Dem Teammitglied {user.mention} wurden **-{amount} XP** abgezogen (Aktuell: {new_val} XP).", ephemeral=True)
 
 
 @bot.tree.command(name="xp-lock", description="Sperre die XP-Einnahme eines Teammitglieds für eine bestimmte Zeit.")
-@app_commands.describe(user="Das Teammitglied", duration="Dauer (z.B. 30m, 2h, 1d)")
-async def xp_lock(interaction: discord.Interaction, user: discord.Member, duration: str):
+@app_commands.describe(user="Das Teammitglied", duration="Dauer (z.B. 30m, 2h, 1d)", grund="Grund für den XP-Lock")
+async def xp_lock(interaction: discord.Interaction, user: discord.Member, duration: str, grund: str):
     if not has_role(interaction.user, XP_BOOST_LOCK_ROLLE_ID) and not interaction.user.guild_permissions.administrator:
         await interaction.response.send_message("❌ Du hast keine Berechtigung für diesen Befehl!", ephemeral=True)
         return
@@ -1711,7 +1732,7 @@ async def xp_lock(interaction: discord.Interaction, user: discord.Member, durati
 
     dm_embed = discord.Embed(
         title="🔒 Deine XP wurden gesperrt",
-        description=f"Du wurdest von einem Teammitglied für **{readable}** für den Erhalt von XP gesperrt.",
+        description=f"Du wurdest von einem Teammitglied für **{readable}** für den Erhalt von XP gesperrt.\n\n**Grund:** {grund}",
         color=discord.Color.red()
     )
     try:
@@ -1719,10 +1740,12 @@ async def xp_lock(interaction: discord.Interaction, user: discord.Member, durati
     except discord.Forbidden:
         pass
 
+    await log_xp_general_action(interaction.guild, "XP Lock", f"Benutzer {user.mention} wurde von {interaction.user.mention} für `{readable}` gesperrt.\n**Grund:** {grund}")
+
 
 @bot.tree.command(name="xp-unlock", description="Entsperre die XP-Einnahme eines Teammitglieds manuell.")
-@app_commands.describe(user="Das Teammitglied")
-async def xp_unlock(interaction: discord.Interaction, user: discord.Member):
+@app_commands.describe(user="Das Teammitglied", grund="Grund für das Entsperren")
+async def xp_unlock(interaction: discord.Interaction, user: discord.Member, grund: str):
     if not has_role(interaction.user, XP_BOOST_LOCK_ROLLE_ID) and not interaction.user.guild_permissions.administrator:
         await interaction.response.send_message("❌ Du hast keine Berechtigung für diesen Befehl!", ephemeral=True)
         return
@@ -1731,18 +1754,24 @@ async def xp_unlock(interaction: discord.Interaction, user: discord.Member):
         xp_locks.pop(user.id, None)
         await interaction.response.send_message(f"🔓 Die XP-Sperre für {user.mention} wurde erfolgreich aufgehoben.", ephemeral=True)
         try:
-            await user.send(embed=discord.Embed(title="🔓 Deine XP wurden entsperrt", description="Deine XP-Sperre wurde vorzeitig aufgehoben.", color=discord.Color.green()))
+            await user.send(embed=discord.Embed(title="🔓 Deine XP wurden entsperrt", description=f"Deine XP-Sperre wurde vorzeitig aufgehoben.\n\n**Grund:** {grund}", color=discord.Color.green()))
         except discord.Forbidden:
             pass
+        await log_xp_general_action(interaction.guild, "XP Unlock", f"Sperre für {user.mention} wurde von {interaction.user.mention} aufgehoben.\n**Grund:** {grund}")
     else:
         await interaction.response.send_message(f"ℹ️ {user.mention} hat aktuell keine aktive XP-Sperre.", ephemeral=True)
 
 
-@bot.tree.command(name="xp-boost", description="Aktiviere einen globalen XP-Boost für den Server.")
+@bot.tree.command(name="xp-boost", description="Aktiviere einen XP Boost für unsere Teammitglieder.")
 @app_commands.describe(percentage="Prozentzahl des Boosts (z.B. 50 für +50%)", duration="Dauer (z.B. 2h, 1d)")
 async def xp_boost(interaction: discord.Interaction, percentage: int, duration: str):
     if not has_role(interaction.user, XP_BOOST_LOCK_ROLLE_ID) and not interaction.user.guild_permissions.administrator:
         await interaction.response.send_message("❌ Du hast keine Berechtigung für diesen Befehl!", ephemeral=True)
+        return
+
+    global active_xp_boost
+    if active_xp_boost and time.time() < active_xp_boost['end_timestamp']:
+        await interaction.response.send_message("❌ Es ist bereits ein XP Boost aktiv! Du kannst erst einen neuen aktivieren, wenn der alte abgelaufen ist oder mit `/boost-stop` gestoppt wurde.", ephemeral=True)
         return
 
     seconds, readable = parse_duration(duration)
@@ -1750,22 +1779,56 @@ async def xp_boost(interaction: discord.Interaction, percentage: int, duration: 
         await interaction.response.send_message("❌ Ungültiges Format! Nutze z.B. `30m`, `2h` oder `1d`.", ephemeral=True)
         return
 
-    global active_xp_boost
     active_xp_boost = {
         'percentage': percentage,
         'end_timestamp': time.time() + seconds
     }
 
-    await interaction.response.send_message(f"🚀 Globaler XP-Boost von **+{percentage}%** für **{readable}** aktiviert!", ephemeral=True)
+    await interaction.response.send_message(f"🚀 XP-Boost von **+{percentage}%** für **{readable}** aktiviert!", ephemeral=True)
 
     boost_channel = bot.get_channel(XP_BOOST_ANNOUNCEMENT_KANAL_ID)
     if boost_channel:
         ann_embed = discord.Embed(
-            title="🚀 Globaler XP-Boost aktiv!",
-            description=f"Es ist ab sofort ein **+{percentage}% XP-Boost** für **{readable}** aktiv! Nutze die Zeit, um extra XP zu sammeln.",
+            title="XP Boost aktiv 🚀",
+            description=(
+                f"**Es ist ab sofort ein +{percentage}% XP-Boost für {readable} aktiv! Nutze die Zeit, um extra XP zu sammeln.**\n\n"
+                f"-# aktiviert von {interaction.user.mention}"
+            ),
             color=discord.Color.green()
         )
-        await boost_channel.send(content="@everyone", embed=ann_embed)
+        await boost_channel.send(content=f"<@1527349817708122189>", embed=ann_embed)
+
+    await log_xp_general_action(interaction.guild, "XP Boost Aktiviert", f"Ein XP-Boost von `+{percentage}%` für `{readable}` wurde von {interaction.user.mention} gestartet.")
+
+
+@bot.tree.command(name="boost-stop", description="Stoppe den aktuell laufenden XP-Boost.")
+async def boost_stop(interaction: discord.Interaction):
+    if not has_role(interaction.user, XP_BOOST_LOCK_ROLLE_ID) and not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("❌ Du hast keine Berechtigung für diesen Befehl!", ephemeral=True)
+        return
+
+    global active_xp_boost
+    if not active_xp_boost or time.time() >= active_xp_boost['end_timestamp']:
+        active_xp_boost = None
+        await interaction.response.send_message("❌ Aktuell läuft kein XP Boost, der gestoppt werden könnte.", ephemeral=True)
+        return
+
+    active_xp_boost = None
+    await interaction.response.send_message("✅ Der aktuelle XP Boost wurde erfolgreich gestoppt.", ephemeral=True)
+
+    boost_channel = bot.get_channel(XP_BOOST_ANNOUNCEMENT_KANAL_ID)
+    if boost_channel:
+        stop_embed = discord.Embed(
+            title="XP Boost deaktiviert 😑",
+            description=(
+                "**Der aktuelle XP Boost wurde deaktiviert!**\n\n"
+                f"-# XP Boost gestoppt von: {interaction.user.mention}"
+            ),
+            color=discord.Color.red()
+        )
+        await boost_channel.send(embed=stop_embed)
+
+    await log_xp_general_action(interaction.guild, "XP Boost Gestoppt", f"Der aktive XP-Boost wurde vorzeitig von {interaction.user.mention} gestoppt.")
 
 
 @bot.tree.command(name="xp-stats", description="Zeige deine eigenen XP oder die eines anderen Teammitglieds an.")
@@ -1800,6 +1863,7 @@ async def xp_reset(interaction: discord.Interaction):
 
     user_xp.clear()
     save_data()
+    await log_xp_general_action(interaction.guild, "XP Reset", f"Das gesamte XP-Leaderboard wurde von {interaction.user.mention} zurückgesetzt.")
     await refresh_leaderboard_in_channel()
     await interaction.response.send_message("🗑️ Das gesamte XP-Leaderboard wurde erfolgreich zurückgesetzt.", ephemeral=True)
 
@@ -2009,5 +2073,9 @@ async def setuptimeleaderboard(ctx):
     await ctx.send(embed=embed, view=TimeLeaderboardView())
     await ctx.send("✅ Zeitauswahl-Leaderboard Panel gesendet!")
 
-# Bot starten
+
+# ==========================================
+# BOT STARTEN
+# ==========================================
+# Trage hier deinen Bot-Token ein oder nutze eine Umgebungsvariable
 bot.run(os.getenv("DISCORD_TOKEN"))
