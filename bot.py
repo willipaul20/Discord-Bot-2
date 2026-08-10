@@ -86,21 +86,6 @@ XP_BOOST_LOCK_ROLLE_ID = 1527349817875890356
 XP_GIVE_REMOVE_ROLLE_ID = 1527349818031214718
 RELOAD_COMMAND_ROLLE_ID = 1527739219907449022
 
-BUERO_WARTERAUM_ID = int(1527349831444729875)
-BUERO_NACHRICHTEN_KANAL_ID = int(1527947809402388490)
-BUERO_KATEGORIE_ID = int(1527349831444729872)
-
-BUERO_VOICE_KANAELE = {
-    "Inhaber": 1527349831645925393,
-    "Projektleitung": 1527349831645925394,
-    "Serverleitung/Serververwaltung": 1527349831645925396,
-    "Teamleitung": 1527349831645925397,
-    "Manager": 1527349831645925398,
-    "Supervisor": 1527349831645925399,
-    "Teamausbildung": 1527349831645925400,
-    "Community Managment": 1527349831956299827
-}
-
 FEEDBACK_PANEL_KANAL_ID = 1527349829942906995
 LOG_KANAL_ID = 1532091859285966868
 CALL_ADMIN_KANAL_ID = 1532102652790444123
@@ -192,12 +177,6 @@ voice_join_times = {}
 xp_locks = {}
 active_xp_boost = None
 leaderboard_message_id = None
-
-active_buero_messages = {}
-active_office_ping_messages = {} 
-buero_join_times = {}
-buero_ticket_warned = set()
-active_buero_dm_messages = {}
 
 
 def is_team_member(member: discord.Member) -> bool:
@@ -627,173 +606,8 @@ class TimeLeaderboardView(ui.View):
 
 
 # ==========================================
-# BÜRO & MODERATION VIEWS & MODALS
+# MODERATION VIEWS & MODALS
 # ==========================================
-
-class BueroMovenView(ui.View):
-    def __init__(self, waiting_user_id: int = 0, target_office_id: int = 0):
-        super().__init__(timeout=None)
-        self.waiting_user_id = waiting_user_id
-        self.target_office_id = target_office_id
-
-    @ui.button(label="Moven ins Büro", style=discord.ButtonStyle.primary, custom_id="buero_moven_btn")
-    async def moven_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer(ephemeral=True)
-
-        if not interaction.user.voice or not interaction.user.voice.channel:
-            await interaction.followup.send("❌ Du musst dich in einem Sprachkanal befinden, nam jemanden zu moven!", ephemeral=True)
-            return
-
-        admin_channel = interaction.user.voice.channel
-
-        if admin_channel.category_id != BUERO_KATEGORIE_ID or admin_channel.id not in BUERO_VOICE_KANAELE.values():
-            await interaction.followup.send("❌ Du befindest dich in keinem gültigen Büro!", ephemeral=True)
-            return
-
-        guild = interaction.guild
-        waiting_member = guild.get_member(self.waiting_user_id)
-        if not waiting_member or not waiting_member.voice or waiting_member.voice.channel is None:
-            await interaction.followup.send("❌ Die Person ist nicht mehr im Warteraum oder hat den Voice verlassen.", ephemeral=True)
-            return
-
-        try:
-            await waiting_member.move_to(admin_channel, reason=f"Verschoben von Büro-Teammitglied: {interaction.user.display_name}")
-            await interaction.followup.send(f"✅ **{waiting_member.display_name}** wurde erfolgreich in dein Büro (`{admin_channel.name}`) verschoben!", ephemeral=True)
-            
-            if self.waiting_user_id in active_buero_messages:
-                try:
-                    await active_buero_messages[self.waiting_user_id].delete()
-                except:
-                    pass
-                active_buero_messages.pop(self.waiting_user_id, None)
-
-            if self.waiting_user_id in active_office_ping_messages:
-                try:
-                    await active_office_ping_messages[self.waiting_user_id].delete()
-                except:
-                    pass
-                active_office_ping_messages.pop(self.waiting_user_id, None)
-            
-            if self.waiting_user_id in active_buero_dm_messages:
-                try:
-                    await active_buero_dm_messages[self.waiting_user_id].delete()
-                except:
-                    pass
-                active_buero_dm_messages.pop(self.waiting_user_id, None)
-
-            buero_join_times.pop(self.waiting_user_id, None)
-            buero_ticket_warned.discard(self.waiting_user_id)
-
-        except discord.Forbidden:
-            await interaction.followup.send("❌ Mir fehlen die Berechtigungen, um diesen Benutzer zu verschieben.", ephemeral=True)
-        except Exception as e:
-            await interaction.followup.send(f"❌ Ein Fehler ist aufgetreten: {e}", ephemeral=True)
-
-
-class BueroAuswahlSelect(ui.Select):
-    def __init__(self, guild: discord.Guild = None):
-        options = []
-        if guild:
-            for buero_name, channel_id in BUERO_VOICE_KANAELE.items():
-                channel = guild.get_channel(channel_id)
-                if channel and isinstance(channel, discord.VoiceChannel):
-                    members = channel.members
-                    if members:
-                        member_names = ", ".join([m.display_name for m in members])
-                        desc = f"Besetzt von: {member_names}"
-                    else:
-                        desc = "Kein Büro besetzt"
-                    
-                    if len(desc) > 100:
-                        desc = desc[:97] + "..."
-
-                    options.append(discord.SelectOption(label=buero_name, value=str(channel_id), description=desc))
-        
-        if not options:
-            options.append(discord.SelectOption(label="Kein Büro verfügbar", value="0"))
-
-        super().__init__(placeholder="🏢 Wähle das gewünschte Büro aus...", min_values=1, max_values=1, options=options, custom_id="buero_auswahl_dropdown")
-
-    async def callback(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
-
-        target_channel_id = int(self.values[0])
-        if target_channel_id == 0:
-            await interaction.followup.send("❌ Ungültige Büro-Auswahl.", ephemeral=True)
-            return
-
-        guild = interaction.guild
-        if guild is None:
-            guild = bot.guilds[0] if bot.guilds else None
-
-        if not guild:
-            await interaction.followup.send("❌ Server konnte nicht ermittelt werden.", ephemeral=True)
-            return
-
-        target_channel = guild.get_channel(target_channel_id)
-        
-        if not target_channel or not isinstance(target_channel, discord.VoiceChannel):
-            await interaction.followup.send("❌ Das ausgewählte Büro wurde nicht gefunden.", ephemeral=True)
-            return
-
-        user = interaction.user
-        member = guild.get_member(user.id)
-
-        if not member or not member.voice or not member.voice.channel:
-            await interaction.followup.send("❌ Du musst dich aktuell im Büro-Warteraum befinden!", ephemeral=True)
-            return
-
-        if member.voice.channel.id != BUERO_WARTERAUM_ID:
-            await interaction.followup.send("❌ Du hast den Warteraum inzwischen verlassen.", ephemeral=True)
-            return
-
-        try:
-            members_in_office = target_channel.members
-            if members_in_office:
-                mentions = " ".join([m.mention for m in members_in_office])
-                ping_content = f"🔔 {mentions} — {member.mention} hat über das Menü angegeben, dass er in dein Büro (**{target_channel.name}**) möchte!"
-            else:
-                ping_content = f"🔔 {member.mention} möchte in das Büro **{target_channel.name}**, aber aktuell ist dort niemand anwesend."
-
-            sent_msg = await target_channel.send(ping_content)
-            active_office_ping_messages[user.id] = sent_msg
-
-            await interaction.followup.send(f"✅ Deine Anfrage für das Büro **{target_channel.name}** wurde gesendet!", ephemeral=True)
-            
-            kanal = bot.get_channel(BUERO_NACHRICHTEN_KANAL_ID)
-            if kanal and user.id in active_buero_messages:
-                try:
-                    old_msg = active_buero_messages[user.id]
-                    updated_embed = discord.Embed(
-                        description=f"🟢 {user.mention} hat sich für das Büro **{target_channel.name}** entschieden und wartet auf das Moven!",
-                        color=discord.Color.green()
-                    )
-                    updated_view = BueroMovenView(waiting_user_id=user.id, target_office_id=target_channel.id)
-                    await old_msg.edit(embed=updated_embed, view=updated_view)
-                except Exception as e:
-                    print(f"Fehler beim Aktualisieren der Team-Nachricht: {e}")
-
-            if user.id in active_buero_dm_messages:
-                try:
-                    await active_buero_dm_messages[user.id].delete()
-                except:
-                    pass
-                active_buero_dm_messages.pop(user.id, None)
-
-            buero_join_times.pop(user.id, None)
-            buero_ticket_warned.discard(user.id)
-
-        except discord.Forbidden:
-            await interaction.followup.send("❌ Mir fehlen die Berechtigungen, um eine Nachricht zu senden.", ephemeral=True)
-        except Exception as e:
-            await interaction.followup.send(f"❌ Ein Fehler ist aufgetreten: {e}", ephemeral=True)
-
-
-class BueroAuswahlView(ui.View):
-    def __init__(self, guild: discord.Guild = None):
-        super().__init__(timeout=None)
-        self.add_item(BueroAuswahlSelect(guild))
-
 
 class LeaderboardTop30View(ui.View):
     def __init__(self):
@@ -1452,117 +1266,6 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
         if not before.channel or before.channel.id not in ALLOWED_VOICE_CHANNELS:
             voice_join_times[member.id] = time.time()
 
-    if after.channel and after.channel.id == BUERO_WARTERAUM_ID:
-        if before.channel and before.channel.id == BUERO_WARTERAUM_ID:
-            return
-
-        if member.id in buero_join_times:
-            return
-
-        buero_join_times[member.id] = time.time()
-        buero_ticket_warned.discard(member.id)
-
-        # Vorherige Nachrichten im Kanal und in DMs bereinigen, um Dubletten absolut auszuschließen
-        if member.id in active_buero_messages:
-            try:
-                await active_buero_messages[member.id].delete()
-            except:
-                pass
-            active_buero_messages.pop(member.id, None)
-
-        if member.id in active_buero_dm_messages:
-            try:
-                await active_buero_dm_messages[member.id].delete()
-            except:
-                pass
-            active_buero_dm_messages.pop(member.id, None)
-
-        kanal = bot.get_channel(BUERO_NACHRICHTEN_KANAL_ID)
-        if kanal:
-            embed = discord.Embed(
-                description=f"🟡 {member.mention} wartet im **Büro Warteraum** und wählt gleich sein Büro via DM aus.",
-                color=discord.Color.gold()
-            )
-            view = BueroMovenView(waiting_user_id=member.id, target_office_id=0)
-            msg = await kanal.send(embed=embed, view=view)
-            active_buero_messages[member.id] = msg
-
-        dm_embed = discord.Embed(
-            title="🏢 Büro-Auswahl • Sirius RP",
-            description=(
-                f"Hallo **{member.display_name}**,\n\n"
-                "Du hast soeben den **Büro-Warteraum** betreten! 💛\n"
-                "Hier hast du die Möglichkeit, direkt auszuwählen, in welches Büro du gerne möchtest.\n\n"
-                "In der folgenden Auswahlliste siehst du bei jedem Büro direkt, wer sich aktuell dort aufhält. "
-                "Wähle einfach das gewünschte Büro aus, damit die dortigen Personen benachrichtigt werden!"
-            ),
-            color=discord.Color.blue()
-        )
-        dm_embed.set_footer(text="Sirius RP • Support System")
-
-        view_dm = BueroAuswahlView(guild)
-        try:
-            dm_msg = await member.send(embed=dm_embed, view=view_dm)
-            active_buero_dm_messages[member.id] = dm_msg
-        except discord.Forbidden:
-            pass
-
-    if before.channel and before.channel.id == BUERO_WARTERAUM_ID:
-        if not after.channel or after.channel.id != BUERO_WARTERAUM_ID:
-            buero_join_times.pop(member.id, None)
-            buero_ticket_warned.discard(member.id)
-            
-            if member.id in active_buero_messages:
-                try:
-                    await active_buero_messages[member.id].delete()
-                except:
-                    pass
-                active_buero_messages.pop(member.id, None)
-
-            if member.id in active_office_ping_messages:
-                try:
-                    await active_office_ping_messages[member.id].delete()
-                except:
-                    pass
-                active_office_ping_messages.pop(member.id, None)
-
-            if member.id in active_buero_dm_messages:
-                try:
-                    await active_buero_dm_messages[member.id].delete()
-                except:
-                    pass
-                active_buero_dm_messages.pop(member.id, None)
-
-
-@tasks.loop(seconds=15)
-async def check_buero_waiting_time():
-    current_time = time.time()
-    for user_id, join_time in list(buero_join_times.items()):
-        if current_time - join_time >= 180 and user_id not in buero_ticket_warned:
-            buero_ticket_warned.add(user_id)
-            
-            for guild in bot.guilds:
-                member = guild.get_member(user_id)
-                if member:
-                    dm_embed = discord.Embed(
-                        title="🎫 Ticket-Empfehlung • Sirius RP",
-                        description=(
-                            "Hallo **{name}**,\n\n"
-                            "Du wartest nun schon seit einiger Zeit im Büro-Warteraum. "
-                            "Da momentan scheinbar kein Teammitglied verfügbar ist, möchten wir dir den Vorschlag machen, "
-                            "gerne ein **Ticket** zu öffnen, damit dir schnellstmöglich geholfen werden kann!\n\n"
-                            "👉 [Hier kommst du direkt zum Ticket-Kanal](https://discord.com/channels/1527349817443877016/1527349829942906998)\n\n"
-                            "Wir danken dir vielmals für deine Geduld! 💛"
-                        ).format(name=member.display_name),
-                        color=discord.Color.gold()
-                    )
-                    dm_embed.set_footer(text="Sirius RP • Support System")
-                    try:
-                        await member.send(embed=dm_embed)
-                    except discord.Forbidden:
-                        pass
-                    break
-
 
 @tasks.loop(seconds=15)
 async def check_expired_boosts():
@@ -1655,7 +1358,6 @@ async def on_ready():
     bot.add_view(StartFeedbackView())
     bot.add_view(StartCallAdminView())
     bot.add_view(SearchResultView())
-    bot.add_view(BueroMovenView())
     bot.add_view(BanBoloAbschliessenView())
     bot.add_view(TimeLeaderboardView())
     bot.add_view(VerifyView())
@@ -1674,8 +1376,6 @@ async def on_ready():
         check_voice_xp.start()
     if not check_expired_boosts.is_running():
         check_expired_boosts.start()
-    if not check_buero_waiting_time.is_running():
-        check_buero_waiting_time.start()
         
     print(f'Erfolg! Eingeloggt as {bot.user}')
 
