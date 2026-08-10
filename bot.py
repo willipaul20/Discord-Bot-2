@@ -133,7 +133,7 @@ QUESTIONS = [
     {"q": "Was bedeutet die New Life Regel?", "max": 6},
     {"q": "Erkläre was FRP ist.", "max": 2},
     {"q": "Was bedeutet Combat Logging?", "max": 6},
-    {"q": "Erkläre what du unter RDM verstehst.", "max": 2},
+    {"q": "Erkläre what du under RDM verstehst.", "max": 2},
     {"q": "Erkläre was du unter Meta Gaming verstehst und was machst du wenn du jemanden erwischt.", "max": 8},
     {"q": "Erkläre was du unter VDM verstehst.", "max": 2},
     {"q": "Wie viele Geiseln darfst du maximal nehmen und wie hoch darf das Lösegeld sein?", "max": 6},
@@ -323,7 +323,8 @@ def build_leaderboard_embed(guild: discord.Guild) -> discord.Embed:
     return embed
 
 
-def get_roblox_avatar_url(username: str) -> str:
+def get_roblox_user_id(username: str) -> int:
+    """Überprüft, ob es den Benutzer in Roblox gibt, und gibt die ID zurück (oder None)."""
     try:
         user_res = requests.post(
             "https://users.roblox.com/v1/usernames/users",
@@ -333,15 +334,24 @@ def get_roblox_avatar_url(username: str) -> str:
         if user_res.status_code == 200:
             data = user_res.json()
             if data["data"]:
-                user_id = data["data"][0]["id"]
-                thumb_res = requests.get(
-                    f"https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds={user_id}&size=150x150&format=Png&isCircular=false",
-                    timeout=5
-                )
-                if thumb_res.status_code == 200:
-                    thumb_data = thumb_res.json()
-                    if thumb_data["data"]:
-                        return thumb_data["data"][0]["imageUrl"]
+                return data["data"][0]["id"]
+    except Exception as e:
+        print(f"Fehler beim Überprüfen des Roblox-Benutzers: {e}")
+    return None
+
+
+def get_roblox_avatar_url(username: str) -> str:
+    try:
+        user_id = get_roblox_user_id(username)
+        if user_id:
+            thumb_res = requests.get(
+                f"https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds={user_id}&size=150x150&format=Png&isCircular=false",
+                timeout=5
+            )
+            if thumb_res.status_code == 200:
+                thumb_data = thumb_res.json()
+                if thumb_data["data"]:
+                    return thumb_data["data"][0]["imageUrl"]
     except Exception as e:
         print(f"Fehler beim Abrufen des Roblox-Avatars: {e}")
     return None
@@ -637,12 +647,13 @@ class BueroMovenView(ui.View):
 
         admin_channel = interaction.user.voice.channel
 
-        if self.target_office_id != 0 and admin_channel.id != self.target_office_id:
-            await interaction.followup.send("❌ Du kannst diesen User nicht moven, da du dich nicht in seinem ausgewählten Ziel-Büro befindest!", ephemeral=True)
+        if admin_channel.category_id != BUERO_KATEGORIE_ID or admin_channel.id not in BUERO_VOICE_KANAELE.values():
+            await interaction.followup.send("❌ Du befindest dich in keinem gültigen Büro!", ephemeral=True)
             return
 
-        if admin_channel.category_id != BUERO_KATEGORIE_ID:
-            await interaction.followup.send("❌ Du befindest dich in keinem gültigen Büro unter der vorgegebenen Kategorie!", ephemeral=True)
+        # 4.1 Bedingung: Nur Personen moven, die sich explizit für dieses Büro ausgewählt haben (und Teammitglied muss im Zielbüro sein)
+        if self.target_office_id != 0 and admin_channel.id != self.target_office_id:
+            await interaction.followup.send("❌ Du kannst diesen User nicht moven, da du dich nicht in seinem ausgewählten Ziel-Büro befindest!", ephemeral=True)
             return
 
         guild = interaction.guild
@@ -822,23 +833,37 @@ class ModerationEintragModal(ui.Modal):
 
         self.grund = ui.TextInput(label="Frage 1: Grund", style=discord.TextStyle.paragraph, placeholder="Grund angeben...", required=True)
         self.roblox_name = ui.TextInput(label="Frage 2: Roblox Benutzername", placeholder="z.B. Max_RP123", required=True)
-        self.dauer = ui.TextInput(label="Frage 3: Dauer", placeholder="z.B. 7d, 24h oder Permanent", required=True)
+        
+        # 5.2 Wenn Kick ausgewählt wird, fragen wir nicht nach der Dauer (Feld wird ausgeblendet oder deaktiviert/optional)
+        if self.typ != "Kick":
+            self.dauer = ui.TextInput(label="Frage 3: Dauer", placeholder="z.B. 7d, 24h oder Permanent", required=True)
+        else:
+            self.dauer = None
 
         self.add_item(self.grund)
         self.add_item(self.roblox_name)
-        self.add_item(self.dauer)
+        if self.dauer:
+            self.add_item(self.dauer)
 
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
 
         r_name = self.roblox_name.value.strip()
+        
+        # 5. Überprüfung, ob der Benutzer in Roblox existiert
+        roblox_id = get_roblox_user_id(r_name)
+        if not roblox_id:
+            await interaction.followup.send(f"❌ Den Benutzer **{r_name}** gibt es auf Roblox nicht. Es wurde kein Eintrag erstellt.", ephemeral=True)
+            return
+
         r_key = r_name.lower()
         typ = self.typ
+        dauer_val = self.dauer.value.strip() if self.dauer else "Permanent"
 
         eintrag = {
             'typ': typ,
             'grund': self.grund.value.strip(),
-            'dauer': self.dauer.value.strip(),
+            'dauer': dauer_val,
             'mod': interaction.user.display_name,
             'timestamp': time.time()
         }
@@ -901,12 +926,13 @@ class ModerationEintragModal(ui.Modal):
 
         avatar_url = get_roblox_avatar_url(r_name)
 
+        # Log senden (wird nur einmal durch diese zentrale Funktion aufgerufen)
         await send_moderation_log(
             guild=interaction.guild,
             action_type=typ,
             roblox_name=r_name,
             grund=self.grund.value.strip(),
-            dauer=self.dauer.value.strip(),
+            dauer=dauer_val,
             moderator=interaction.user.mention,
             avatar_url=avatar_url
         )
@@ -918,7 +944,7 @@ class ModerationEintragModal(ui.Modal):
         )
         embed.add_field(name="👤 Roblox Name", value=f"`{r_name}`", inline=True)
         embed.add_field(name="📌 Typ", value=f"`{typ}`", inline=True)
-        embed.add_field(name="⏳ Dauer", value=f"`{self.dauer.value.strip()}`", inline=True)
+        embed.add_field(name="⏳ Dauer", value=f"`{dauer_val}`", inline=True)
         embed.add_field(name="📝 Grund", value=self.grund.value.strip(), inline=False)
         embed.set_footer(text=f"Eingetragen von {interaction.user.display_name} • Emergency Hamburg")
 
@@ -1796,7 +1822,8 @@ async def xp_boost(interaction: discord.Interaction, percentage: int, duration: 
             ),
             color=discord.Color.green()
         )
-        await boost_channel.send(content=f"<@1527349817708122189>", embed=ann_embed)
+        # 1. Rolle 1527349817708122189 wird jetzt korrekt gepingt
+        await boost_channel.send(content=f"<@&{TEAM_ROLLE_ID}>", embed=ann_embed)
 
     await log_xp_general_action(interaction.guild, "XP Boost Aktiviert", f"Ein XP-Boost von `+{percentage}%` für `{readable}` wurde von {interaction.user.mention} gestartet.")
 
@@ -1882,8 +1909,14 @@ async def dizzykontrolle(interaction: discord.Interaction, user: discord.Member)
     mod_id = interaction.user.id
     target_id = user.id
 
+    # 3. Sich selber nicht dizzy kontrollieren können
+    if mod_id == target_id:
+        await interaction.response.send_message("❌ Du kannst dich nicht selbst dizzy kontrollieren!", ephemeral=True)
+        return
+
+    # 3.1 Wenn man die Person schon dizzy kontrolliert hat, keine XP mehr (und auch nicht sich selbst)
     if (mod_id, target_id) in durchgefuehrte_kontrollen:
-        await interaction.response.send_message(f"❌ Du hast die Dizzykontrolle für {user.mention} bereits durchgeführt!", ephemeral=True)
+        await interaction.response.send_message(f"❌ Du hast die Dizzykontrolle für {user.mention} bereits durchgeführt! Du erhältst keine XP mehr dafür.", ephemeral=True)
         return
 
     durchgefuehrte_kontrollen.add((mod_id, target_id))
@@ -2063,7 +2096,7 @@ async def setupadmin(ctx):
 
 
 @bot.command()
-@commands.has_permissions(administrator=True)
+@commands.has_permissions(administrator=User) if 'User' in globals() else commands.has_permissions(administrator=True)
 async def setuptimeleaderboard(ctx):
     embed = discord.Embed(
         title="⏰ Zeitauswahl & Leaderboard",
@@ -2077,5 +2110,4 @@ async def setuptimeleaderboard(ctx):
 # ==========================================
 # BOT STARTEN
 # ==========================================
-# Trage hier deinen Bot-Token ein oder nutze eine Umgebungsvariable
 bot.run(os.getenv("DISCORD_TOKEN"))
