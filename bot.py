@@ -651,11 +651,6 @@ class BueroMovenView(ui.View):
             await interaction.followup.send("❌ Du befindest dich in keinem gültigen Büro!", ephemeral=True)
             return
 
-        # 4.1 Bedingung: Nur Personen moven, die sich explizit für dieses Büro ausgewählt haben (und Teammitglied muss im Zielbüro sein)
-        if self.target_office_id != 0 and admin_channel.id != self.target_office_id:
-            await interaction.followup.send("❌ Du kannst diesen User nicht moven, da du dich nicht in seinem ausgewählten Ziel-Büro befindest!", ephemeral=True)
-            return
-
         guild = interaction.guild
         waiting_member = guild.get_member(self.waiting_user_id)
         if not waiting_member or not waiting_member.voice or waiting_member.voice.channel is None:
@@ -834,7 +829,6 @@ class ModerationEintragModal(ui.Modal):
         self.grund = ui.TextInput(label="Frage 1: Grund", style=discord.TextStyle.paragraph, placeholder="Grund angeben...", required=True)
         self.roblox_name = ui.TextInput(label="Frage 2: Roblox Benutzername", placeholder="z.B. Max_RP123", required=True)
         
-        # 5.2 Wenn Kick ausgewählt wird, fragen wir nicht nach der Dauer (Feld wird ausgeblendet oder deaktiviert/optional)
         if self.typ != "Kick":
             self.dauer = ui.TextInput(label="Frage 3: Dauer", placeholder="z.B. 7d, 24h oder Permanent", required=True)
         else:
@@ -850,7 +844,6 @@ class ModerationEintragModal(ui.Modal):
 
         r_name = self.roblox_name.value.strip()
         
-        # 5. Überprüfung, ob der Benutzer in Roblox existiert
         roblox_id = get_roblox_user_id(r_name)
         if not roblox_id:
             await interaction.followup.send(f"❌ Den Benutzer **{r_name}** gibt es auf Roblox nicht. Es wurde kein Eintrag erstellt.", ephemeral=True)
@@ -926,7 +919,6 @@ class ModerationEintragModal(ui.Modal):
 
         avatar_url = get_roblox_avatar_url(r_name)
 
-        # Log senden (wird nur einmal durch diese zentrale Funktion aufgerufen)
         await send_moderation_log(
             guild=interaction.guild,
             action_type=typ,
@@ -1465,6 +1457,10 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
         if before.channel and before.channel.id == BUERO_WARTERAUM_ID:
             return
 
+        # Verhindere doppeltes Erstellen, falls der User bereits registriert ist
+        if member.id in buero_join_times:
+            return
+
         buero_join_times[member.id] = time.time()
         buero_ticket_warned.discard(member.id)
 
@@ -1822,7 +1818,6 @@ async def xp_boost(interaction: discord.Interaction, percentage: int, duration: 
             ),
             color=discord.Color.green()
         )
-        # 1. Rolle 1527349817708122189 wird jetzt korrekt gepingt
         await boost_channel.send(content=f"<@&{TEAM_ROLLE_ID}>", embed=ann_embed)
 
     await log_xp_general_action(interaction.guild, "XP Boost Aktiviert", f"Ein XP-Boost von `+{percentage}%` für `{readable}` wurde von {interaction.user.mention} gestartet.")
@@ -1909,12 +1904,10 @@ async def dizzykontrolle(interaction: discord.Interaction, user: discord.Member)
     mod_id = interaction.user.id
     target_id = user.id
 
-    # 3. Sich selber nicht dizzy kontrollieren können
     if mod_id == target_id:
         await interaction.response.send_message("❌ Du kannst dich nicht selbst dizzy kontrollieren!", ephemeral=True)
         return
 
-    # 3.1 Wenn man die Person schon dizzy kontrolliert hat, keine XP mehr (und auch nicht sich selbst)
     if (mod_id, target_id) in durchgefuehrte_kontrollen:
         await interaction.response.send_message(f"❌ Du hast die Dizzykontrolle für {user.mention} bereits durchgeführt! Du erhältst keine XP mehr dafür.", ephemeral=True)
         return
@@ -2096,7 +2089,7 @@ async def setupadmin(ctx):
 
 
 @bot.command()
-@commands.has_permissions(administrator=User) if 'User' in globals() else commands.has_permissions(administrator=True)
+@commands.has_permissions(administrator=True)
 async def setuptimeleaderboard(ctx):
     embed = discord.Embed(
         title="⏰ Zeitauswahl & Leaderboard",
