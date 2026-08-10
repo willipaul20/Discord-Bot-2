@@ -637,26 +637,28 @@ class BueroMovenView(ui.View):
         self.target_office_id = target_office_id
 
     @ui.button(label="Moven ins Büro", style=discord.ButtonStyle.primary, custom_id="buero_moven_btn")
-    async def moven_button(self, interaction: discord.Interaction, button: ui.Button):
+    async def moven_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
+
         if not interaction.user.voice or not interaction.user.voice.channel:
-            await interaction.response.send_message("❌ Du musst dich in einem Sprachkanal befinden, um jemanden zu moven!", ephemeral=True)
+            await interaction.followup.send("❌ Du musst dich in einem Sprachkanal befinden, nam jemanden zu moven!", ephemeral=True)
             return
 
         admin_channel = interaction.user.voice.channel
 
         if admin_channel.category_id != BUERO_KATEGORIE_ID or admin_channel.id not in BUERO_VOICE_KANAELE.values():
-            await interaction.response.send_message("❌ Du befindest dich in keinem gültigen Büro!", ephemeral=True)
+            await interaction.followup.send("❌ Du befindest dich in keinem gültigen Büro!", ephemeral=True)
             return
 
         guild = interaction.guild
         waiting_member = guild.get_member(self.waiting_user_id)
         if not waiting_member or not waiting_member.voice or waiting_member.voice.channel is None:
-            await interaction.response.send_message("❌ Die Person ist nicht mehr im Warteraum oder hat den Voice verlassen.", ephemeral=True)
+            await interaction.followup.send("❌ Die Person ist nicht mehr im Warteraum oder hat den Voice verlassen.", ephemeral=True)
             return
 
         try:
             await waiting_member.move_to(admin_channel, reason=f"Verschoben von Büro-Teammitglied: {interaction.user.display_name}")
-            await interaction.response.send_message(f"✅ **{waiting_member.display_name}** wurde erfolgreich in dein Büro (`{admin_channel.name}`) verschoben!", ephemeral=True)
+            await interaction.followup.send(f"✅ **{waiting_member.display_name}** wurde erfolgreich in dein Büro (`{admin_channel.name}`) verschoben!", ephemeral=True)
             
             if self.waiting_user_id in active_buero_messages:
                 try:
@@ -683,9 +685,9 @@ class BueroMovenView(ui.View):
             buero_ticket_warned.discard(self.waiting_user_id)
 
         except discord.Forbidden:
-            await interaction.response.send_message("❌ Mir fehlen die Berechtigungen, um diesen Benutzer zu verschieben.", ephemeral=True)
+            await interaction.followup.send("❌ Mir fehlen die Berechtigungen, um diesen Benutzer zu verschieben.", ephemeral=True)
         except Exception as e:
-            await interaction.response.send_message(f"❌ Ein Fehler ist aufgetreten: {e}", ephemeral=True)
+            await interaction.followup.send(f"❌ Ein Fehler ist aufgetreten: {e}", ephemeral=True)
 
 
 class BueroAuswahlSelect(ui.Select):
@@ -1460,7 +1462,7 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
         buero_join_times[member.id] = time.time()
         buero_ticket_warned.discard(member.id)
 
-        # Vorherige Nachrichten sicherheitshalber bereinigen, um Dubletten auszuschließen
+        # Vorherige Nachrichten im Kanal und in DMs bereinigen, um Dubletten absolut auszuschließen
         if member.id in active_buero_messages:
             try:
                 await active_buero_messages[member.id].delete()
@@ -2109,6 +2111,7 @@ async def setuptimeleaderboard(ctx):
     )
     await ctx.send(embed=embed, view=TimeLeaderboardView())
     await ctx.send("✅ Zeitauswahl-Leaderboard Panel gesendet!")
+
 
 # ==========================================
 # BOT STARTEN
