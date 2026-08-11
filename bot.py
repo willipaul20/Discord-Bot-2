@@ -54,8 +54,25 @@ NEBEN_ROLLEN = [
     1527426915214950550,  # 💜 || Community Managment
 ]
 
-# Speichert die Nachricht-Referenzen für automatische Updates der Teamliste
 TEAM_NACHRICHTEN = {}
+benutzte_nachrichten = set()
+
+
+async def pruefe_und_kontrolliere(channel, user):
+    gueltige_nachricht = None
+
+    async for message in channel.history(limit=100):
+        if message.author == user:
+            if message.id not in benutzte_nachrichten:
+                gueltige_nachricht = message
+                break
+
+    if not gueltige_nachricht:
+        return "Die Person hat keine verfügbare Nachricht im Chat! Sie muss erst etwas Neues schreiben."
+
+    benutzte_nachrichten.add(gueltige_nachricht.id)
+    return "Kontrolle erfolgreich durchgeführt!"
+
 
 # ==========================================
 # WAFFENSCHEIN SYSTEM
@@ -98,7 +115,6 @@ class WaffenscheinView(ui.View):
 # HELPER FUNCTIONS & TEAMLISTE LOGIK
 # ==========================================
 async def send_private_protocol(leader_user: discord.User, protocol_content: str):
-    """Sendet das fertig gestellte Protokoll privat per DM an den Gesprächsleiter."""
     try:
         await leader_user.send(
             f"📋 **Hier ist das Protokoll deiner letzten Sitzung:**\n\n{protocol_content}"
@@ -109,7 +125,6 @@ async def send_private_protocol(leader_user: discord.User, protocol_content: str
 
 
 async def send_moderation_log(guild: discord.Guild, action_type: str, roblox_name: str, grund: str, dauer: str, moderator: str, avatar_url: str = None):
-    """Sendet Moderations-Einträge zielgerichtet an den festgelegten Kanal (ID: 1527349831444729868)."""
     kanal = guild.get_channel(1527349831444729868)
     if not kanal:
         return
@@ -129,7 +144,6 @@ async def send_moderation_log(guild: discord.Guild, action_type: str, roblox_nam
 
 
 def formatiere_liste(mitglieder):
-    """Formatiert eine Liste von Mitgliedern im Baum-Design."""
     if not mitglieder:
         return ""
 
@@ -145,7 +159,6 @@ def formatiere_liste(mitglieder):
 async def generiere_team_embeds(guild: discord.Guild):
     embeds = []
 
-    # 1. Block: Leitungsteam (Blau)
     leitung_ids = [
         1527739219907449022,
         1527349818068959301,
@@ -179,7 +192,6 @@ async def generiere_team_embeds(guild: discord.Guild):
     embed_leitung.description = content_leitung
     embeds.append(embed_leitung)
 
-    # 2. Block: Führungsteam (Blau)
     fuehrung_ids = [
         1527349818068959293,
         1527349818068959292,
@@ -209,7 +221,6 @@ async def generiere_team_embeds(guild: discord.Guild):
     embed_fuehrung.description = content_fuehrung
     embeds.append(embed_fuehrung)
 
-    # 3. Block: Admin-Team (Blau)
     admin_ids = [
         1527349817800523855,
         1527349817800523854,
@@ -236,7 +247,6 @@ async def generiere_team_embeds(guild: discord.Guild):
     embed_admin.description = content_admin
     embeds.append(embed_admin)
 
-    # 4. Block: Moderations-Team (Blau)
     mod_ids = [1527349817800523851, 1527349817800523850, 1527349817800523849]
     embed_mod = discord.Embed(color=discord.Color.blue())
     content_mod = "## ▬▬ ⚖️Moderations-Team ▬▬\n"
@@ -259,7 +269,6 @@ async def generiere_team_embeds(guild: discord.Guild):
     embed_mod.description = content_mod
     embeds.append(embed_mod)
 
-    # 5. Block: Support-Team (Blau)
     supp_ids = [
         1527349817800523847,
         1527349817708122191,
@@ -286,7 +295,6 @@ async def generiere_team_embeds(guild: discord.Guild):
     embed_supp.description = content_supp
     embeds.append(embed_supp)
 
-    # 6. Block: Nebenrollen (Gelb - Mehrfachnennung erlaubt)
     embed_neben = discord.Embed(color=discord.Color.gold())
     content_neben = "## ▬▬ 🚀Nebenrollen ▬▬\n"
     for r_id in NEBEN_ROLLEN:
@@ -320,7 +328,6 @@ def keep_alive():
     t = Thread(target=run)
     t.start()
 
-# Webserver starten
 keep_alive()
 
 # ==========================================
@@ -351,19 +358,16 @@ XP_BOOST_ANNOUNCEMENT_KANAL_ID = 1527677485960007680
 EINTRAG_PANEL_KANAL_ID = 1532144498317070586
 BAN_BOLO_KANAL_ID = 1532144498317070586
 
-# Neue Log-Kanal IDs
 DIZZY_LOG_KANAL_ID = 1532348593573199872
 XP_LOG_KANAL_ID = 1532348632412721312
 BAN_BOLO_LOG_KANAL_ID = 1532348686385025205
 CALL_ADMIN_LOG_KANAL_ID = 1532348723705811016
 FEEDBACK_REMOVE_LOG_KANAL_ID = 1536669127891226624
 
-# Verify System IDs
 VERIFY_KANAL_ID = 1527404574430855340
 UNVERIFIED_ROLLE_ID = 1527404452829466735
 VERIFIED_ROLLE_ID = 1527349817586483229
 
-# BEWERBUNG SYSTEM KONFIGURATION
 ALLOWED_ROLES = [1527349818031214718, 1528123954659590154]
 PASS_SCORE = 35
 MAX_SCORE = 54
@@ -382,9 +386,6 @@ QUESTIONS = [
     {"q": "Was muss man in Savezonen beachten?", "max": 2}
 ]
 
-# ==========================================
-# DATENBANK & SPEICHER (MIT PERSISTENZ)
-# ==========================================
 DATA_FILE = "bot_database.json"
 
 def load_data():
@@ -593,9 +594,6 @@ def get_roblox_avatar_url(username: str) -> str:
     return None
 
 
-# ==========================================
-# COMMAND: FEEDBACK STATS & REMOVE
-# ==========================================
 @bot.tree.command(name="feedback-stats", description="Zeige die Feedback-Statistiken für ein Teammitglied an.")
 @app_commands.describe(user="Das Teammitglied")
 async def feedback_stats(interaction: discord.Interaction, user: discord.Member):
@@ -745,10 +743,6 @@ async def feedback_remove(interaction: discord.Interaction, user: discord.Member
         
     await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
-
-# ==========================================
-# BEWERBUNG SYSTEM (MODALS & VIEWS)
-# ==========================================
 
 class StartModal(discord.ui.Modal, title="Bewerbungsgespräch Starten"):
     applicant = discord.ui.TextInput(
@@ -919,10 +913,6 @@ class StartBewerbungView(discord.ui.View):
         await interaction.response.send_modal(StartModal())
 
 
-# ==========================================
-# VERIFY UI-KOMPONENTEN
-# ==========================================
-
 class VerifyView(ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -954,10 +944,6 @@ class VerifyView(ui.View):
         except Exception as e:
             await interaction.response.send_message(f"❌ Ein unerwarteter Fehler ist aufgetreten: {e}", ephemeral=True)
 
-
-# ==========================================
-# ZEITAUSWAHL & LEADERBOARD UI-KOMPONENTEN
-# ==========================================
 
 class TimeSelectionModal(ui.Modal, title="Zeitauswahl & Eintrag"):
     username_input = ui.TextInput(label="Ihr Name", placeholder="z. B. Anna", required=True)
@@ -1015,10 +1001,6 @@ class TimeLeaderboardView(ui.View):
         )
         await interaction.followup.send(embed=embed, ephemeral=True)
 
-
-# ==========================================
-# MODERATION VIEWS & MODALS
-# ==========================================
 
 class LeaderboardTop30View(ui.View):
     def __init__(self):
@@ -1661,10 +1643,6 @@ class StartCallAdminView(ui.View):
         await interaction.response.send_modal(CallAdminModal())
 
 
-# ==========================================
-# EVENTS & LOOPS
-# ==========================================
-
 @bot.event
 async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
     guild = member.guild
@@ -1775,7 +1753,6 @@ async def refresh_leaderboard_in_channel():
         print(f"Fehler beim Aktualisieren des Leaderboards: {e}")
 
 
-# --- EVENT: AUTOMATISCHES UPDATE DER TEAMLISTE ---
 @bot.event
 async def on_member_update(before, after):
     if before.roles != after.roles:
@@ -1858,10 +1835,6 @@ async def on_message(message: discord.Message):
     await bot.process_commands(message)
 
 
-# ==========================================
-# WAFFENSCHEIN & TEAMLISTE SETUP COMMANDS
-# ==========================================
-
 @bot.command()
 async def setupwaffenschein(ctx):
     if not any(r.id == RELOAD_COMMAND_ROLLE_ID for r in ctx.author.roles) and not ctx.author.guild_permissions.administrator:
@@ -1906,10 +1879,6 @@ async def teamliste_setup(interaction: discord.Interaction):
     TEAM_NACHRICHTEN[interaction.guild.id] = msg
     await interaction.followup.send("Teamliste erfolgreich erstellt!", ephemeral=True)
 
-
-# ==========================================
-# SLASH COMMANDS & SETUP
-# ==========================================
 
 @bot.tree.command(name="xp-add", description="Füge einem Teammitglied XP hinzu.")
 @app_commands.describe(user="Das Teammitglied", amount="Anzahl der XP")
@@ -2310,7 +2279,4 @@ async def setuptimeleaderboard(ctx):
     await ctx.send("✅ Zeitauswahl-Leaderboard Panel gesendet!")
 
 
-# ==========================================
-# BOT STARTEN
-# ==========================================
 bot.run(os.getenv("DISCORD_TOKEN"))
