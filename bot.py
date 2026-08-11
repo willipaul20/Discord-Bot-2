@@ -116,10 +116,10 @@ MAX_SCORE = 54
 QUESTIONS = [
     {"q": "Welche Regeln sind laut Roblox verboten?", "max": 10},
     {"q": "Was bedeutet die New Life Regel?", "max": 6},
-    {"q": "Erkläre was FRP ist.", "max": 2},
+    {"q": "Erkläre what FRP ist.", "max": 2},
     {"q": "Was bedeutet Combat Logging?", "max": 6},
     {"q": "Erkläre what du under RDM verstehst.", "max": 2},
-    {"q": "Erkläre was du unter Meta Gaming verstehst und was machst du wenn du jemanden erwischt.", "max": 8},
+    {"q": "Erkläre what du under Meta Gaming verstehst und what machst du wenn du jemanden erwischt.", "max": 8},
     {"q": "Erkläre what du under VDM verstehst.", "max": 2},
     {"q": "Wie viele Geiseln darfst du maximal nehmen und wie hoch darf das Lösegeld sein?", "max": 6},
     {"q": "Stell dir vor ein Cop stürmt in einer Geiselnahme, obwohl die Geiseln bedroht wurden. Was tust du?", "max": 6},
@@ -333,6 +333,61 @@ def get_roblox_avatar_url(username: str) -> str:
     except Exception as e:
         print(f"Fehler beim Abrufen des Roblox-Avatars: {e}")
     return None
+
+
+# ==========================================
+# COMMAND: FEEDBACK STATS
+# ==========================================
+@bot.tree.command(name="feedback-stats", description="Zeige die Feedback-Statistiken für ein Teammitglied an.")
+@app_commands.describe(user="Das Teammitglied")
+async def feedback_stats(interaction: discord.Interaction, user: discord.Member):
+    # Nur Leute mit der Rolle 1527349817875890356 können den Befehl ausführen
+    if not has_role(interaction.user, XP_BOOST_LOCK_ROLLE_ID):
+        await interaction.response.send_message("❌ Du hast keine Berechtigung, diesen Befehl auszuführen.", ephemeral=True)
+        return
+
+    # Nur Feedback Stats von Leuten mit dieser Rolle 1527349817708122189 anzeigen
+    if not has_role(user, TEAM_ROLLE_ID):
+        await interaction.response.send_message("❌ Diese Person hat keine Feedback-Statistiken (kein Teammitglied).", ephemeral=True)
+        return
+
+    log_kanal = interaction.guild.get_channel(LOG_KANAL_ID)
+    if not log_kanal:
+        await interaction.response.send_message("❌ Log-Kanal nicht gefunden.", ephemeral=True)
+        return
+
+    total_score = 0
+    count = 0
+    
+    # Durchsuchen der Logs nach Feedbacks für den Benutzer
+    async for message in log_kanal.history(limit=500):
+        if message.author == bot.user and message.embeds:
+            embed = message.embeds[0]
+            if embed.title == "🌟 Neues Feedback":
+                # Prüfen, ob der User im Feld "An:" erwähnt wird
+                for field in embed.fields:
+                    if field.name == "**An:**" and str(user.id) in field.value:
+                        # Sterne zählen
+                        sterne_field = next((f for f in embed.fields if f.name == "**Bewertung:**"), None)
+                        if sterne_field:
+                            sterne = sterne_field.value.count("⭐")
+                            total_score += sterne
+                            count += 1
+
+    if count == 0:
+        await interaction.response.send_message(f"ℹ️ {user.display_name} hat bisher kein Feedback erhalten.", ephemeral=True)
+    else:
+        avg = total_score / count
+        embed = discord.Embed(
+            title=f"📊 Feedback-Statistik: {user.display_name}",
+            description=f"Hier ist der berechnete Durchschnitt aller erhaltenen Feedbacks:",
+            color=discord.Color.gold()
+        )
+        embed.add_field(name="Durchschnittsbewertung", value=f"**{avg:.2f} ⭐** (basiert auf {count} Bewertungen)", inline=False)
+        embed.set_thumbnail(url=user.display_avatar.url)
+        embed.set_footer(text="Sirius RP • Feedback-System")
+        
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 # ==========================================
