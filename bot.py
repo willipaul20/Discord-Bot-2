@@ -13,6 +13,51 @@ from discord import app_commands, ui
 from discord.errors import NotFound
 
 # ==========================================
+# KONFIGURATION & IDS
+# ==========================================
+TEAM_ROLLE_ID = 1527349817708122189
+RELOAD_COMMAND_ROLLE_ID = 1527739219907449022
+KLEINER_WAFFENSCHEIN_ROLLE_ID = 1527349817586483220
+GROSSER_WAFFENSCHEIN_ROLLE_ID = 1527349817586483221
+
+# ==========================================
+# WAFFENSCHEIN SYSTEM
+# ==========================================
+
+class WaffenscheinSelect(ui.UserSelect):
+    def __init__(self):
+        super().__init__(placeholder="Wähle einen Nutzer aus...", min_values=1, max_values=1, custom_id="waffenschein_user_select")
+
+    async def callback(self, interaction: discord.Interaction):
+        member = interaction.guild.get_member(self.values[0].id)
+        if not member:
+            await interaction.response.send_message("❌ Nutzer nicht gefunden.", ephemeral=True)
+            return
+
+        has_klein = any(r.id == KLEINER_WAFFENSCHEIN_ROLLE_ID for r in member.roles)
+        has_gross = any(r.id == GROSSER_WAFFENSCHEIN_ROLLE_ID for r in member.roles)
+
+        status = []
+        if has_klein: status.append("✅ Kleiner Waffenschein")
+        else: status.append("❌ Kleiner Waffenschein")
+        
+        if has_gross: status.append("✅ Großer Waffenschein")
+        else: status.append("❌ Großer Waffenschein")
+
+        embed = discord.Embed(
+            title=f"Waffenschein-Status: {member.display_name}",
+            description="\n".join(status),
+            color=discord.Color.blue()
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+class WaffenscheinView(ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(WaffenscheinSelect())
+
+
+# ==========================================
 # HELPER FUNCTIONS
 # ==========================================
 async def send_private_protocol(leader_user: discord.User, protocol_content: str):
@@ -78,13 +123,10 @@ intents.reactions = True
 bot = commands.Bot(command_prefix='!', intents=intents)
 
 # ==========================================
-# KONFIGURATION (IDS & LINKS)
+# WEITERE KONFIGURATION (IDS & LINKS)
 # ==========================================
-TEAM_ROLLE_ID = 1527349817708122189
-
 XP_BOOST_LOCK_ROLLE_ID = 1527349817875890356
 XP_GIVE_REMOVE_ROLLE_ID = 1527349818031214718
-RELOAD_COMMAND_ROLLE_ID = 1527739219907449022
 
 FEEDBACK_PANEL_KANAL_ID = 1527349829942906995
 LOG_KANAL_ID = 1532091859285966868
@@ -476,7 +518,6 @@ async def feedback_remove(interaction: discord.Interaction, user: discord.Member
         await interaction.response.send_message(f"ℹ️ Für {user.display_name} sind keine Feedbacks im System hinterlegt.", ephemeral=True)
         return
 
-    # Verknüpfe jedes Feedback mit seinem echten (ursprünglichen) Index aus der Liste vor dem Sortieren
     feedbacks_with_orig_idx = list(enumerate(feedbacks))
     sorted_feedbacks_with_orig_idx = sorted(feedbacks_with_orig_idx, key=lambda x: x[1]["timestamp"], reverse=True)
 
@@ -1534,6 +1575,7 @@ async def on_ready():
     bot.add_view(TimeLeaderboardView())
     bot.add_view(VerifyView())
     bot.add_view(StartBewerbungView())
+    bot.add_view(WaffenscheinView()) # Hier für die Waffenschein-Persistence hinzugefügt
 
     try:
         synced = await bot.tree.sync()
@@ -1576,6 +1618,38 @@ async def on_message(message: discord.Message):
             await refresh_leaderboard_in_channel()
 
     await bot.process_commands(message)
+
+
+# ==========================================
+# NEUER BEFEHL: !setupwaffenschein
+# ==========================================
+
+@bot.command()
+async def setupwaffenschein(ctx):
+    if not any(r.id == RELOAD_COMMAND_ROLLE_ID for r in ctx.author.roles) and not ctx.author.guild_permissions.administrator:
+        await ctx.send("❌ Du hast keine Berechtigung dafür.", ephemeral=True)
+        return
+
+    embed = discord.Embed(
+        title="🛡️ Waffenschein überprüfen",
+        description=(
+            "Hier kannst du überprüfen ob eine Person einen Waffenschein hat.\n\n"
+            "— — — — — — — — —\n\n"
+            "Klicke nur unten auf den Button, wähle einen Nutzer aus und sehe ob diese Person einen Waffenschein hat!\n\n"
+            "— — — — — — — — —\n\n"
+            "**Großer Waffenschein:** Maschinenpistolen (MP5), Sturmgewehre (M4 Karabiner, G36) und Scharfschützengewehre (Sniper).\n"
+            "**Kleiner Waffenschein:** Leichte Handfeuerwaffen (z. B. Desert Eagle, Glock 17)\n\n"
+            "— — — — — — — — —\n\n"
+            "Du kannst dich hier für einen Waffenschein bewerben: https://discord.com/channels/1527349817443877016/1527616653611896833"
+        ),
+        color=discord.Color.dark_grey()
+    )
+    
+    await ctx.send(embed=embed, view=WaffenscheinView())
+    try:
+        await ctx.message.delete()
+    except Exception:
+        pass
 
 
 # ==========================================
@@ -1821,7 +1895,6 @@ async def dizzykontrolle(interaction: discord.Interaction, user: discord.Member)
         color=discord.Color.green()
     )
     
-    # Nachricht im Dizzy-Kanal (1527349819742355624) senden, die nach 1 Minute verschwindet
     await interaction.response.send_message(embed=embed)
     try:
         original_msg = await interaction.original_response()
@@ -1829,7 +1902,6 @@ async def dizzykontrolle(interaction: discord.Interaction, user: discord.Member)
     except Exception:
         pass
 
-    # Nachricht im Logs-Kanal (1532348593573199872) senden (bleibt dauerhaft erhalten)
     dizzy_log_kanal = interaction.guild.get_channel(DIZZY_LOG_KANAL_ID)
     if dizzy_log_kanal:
         log_embed = discord.Embed(
