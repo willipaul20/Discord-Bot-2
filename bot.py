@@ -372,7 +372,6 @@ async def feedback_stats(interaction: discord.Interaction, user: discord.Member)
         
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-    # Logging für feedback-stats
     log_kanal = interaction.guild.get_channel(FEEDBACK_REMOVE_LOG_KANAL_ID)
     if log_kanal:
         log_embed = discord.Embed(
@@ -411,7 +410,6 @@ class FeedbackRemoveReasonModal(ui.Modal, title="Grund für Feedback-Entfernung"
             team_feedbacks.pop(user_id_str, None)
         save_data()
 
-        # XP Abzug anpassen falls vergeben
         xp_map = {3: 3, 4: 10, 5: 15}
         xp_zu_entfernen = xp_map.get(removed_fb["sterne"], 0)
         if xp_zu_entfernen > 0:
@@ -420,7 +418,6 @@ class FeedbackRemoveReasonModal(ui.Modal, title="Grund für Feedback-Entfernung"
             save_data()
             await refresh_leaderboard_in_channel()
 
-        # Embed Nachricht für den Log-Kanal 1536669127891226624
         log_kanal = interaction.guild.get_channel(FEEDBACK_REMOVE_LOG_KANAL_ID)
         if log_kanal:
             log_embed = discord.Embed(
@@ -443,7 +440,6 @@ class FeedbackRemoveSelect(ui.Select):
     def __init__(self, target_user: discord.Member, feedbacks: list):
         self.target_user = target_user
         options = []
-        # Feedbacks von neu nach alt (da sie in der Liste umgekehrt oder mit Index angezeigt werden)
         for idx, fb in enumerate(feedbacks):
             stars_str = "⭐" * fb["sterne"]
             label = f"#{idx+1} | {stars_str} | Von: {fb['autor_name']}"
@@ -467,12 +463,10 @@ class FeedbackRemoveView(ui.View):
 @bot.tree.command(name="feedback-remove", description="Entferne ein Feedback eines Teammitglieds.")
 @app_commands.describe(user="Das Teammitglied")
 async def feedback_remove(interaction: discord.Interaction, user: discord.Member):
-    # Berechtigte Rolle: 1527349818031214718
     if not has_role(interaction.user, 1527349818031214718) and not interaction.user.guild_permissions.administrator:
         await interaction.response.send_message("❌ Du hast keine Berechtigung, diesen Befehl auszuführen.", ephemeral=True)
         return
 
-    # Wer Feedback entfernen kann: Nur bei Leuten mit Rolle 1527349817708122189
     if not has_role(user, 1527349817708122189):
         await interaction.response.send_message("❌ Dieses Mitglied hat keine Teamrolle und somit keine Feedbacks.", ephemeral=True)
         return
@@ -482,7 +476,6 @@ async def feedback_remove(interaction: discord.Interaction, user: discord.Member
         await interaction.response.send_message(f"ℹ️ Für {user.display_name} sind keine Feedbacks im System hinterlegt.", ephemeral=True)
         return
 
-    # Von neu nach alt sortieren (neueste am Anfang)
     sorted_feedbacks = sorted(feedbacks, key=lambda x: x["timestamp"], reverse=True)
 
     view = FeedbackRemoveView(user, sorted_feedbacks)
@@ -492,7 +485,7 @@ async def feedback_remove(interaction: discord.Interaction, user: discord.Member
         description="Wähle im Dropdown-Menü unten das Feedback aus, welches du entfernen möchtest. (Neu nach Alt sortiert)",
         color=discord.Color.red()
     )
-    for idx, fb in enumerate(sorted_feedbacks[:5]): # Zeige Vorschau dersten 5
+    for idx, fb in enumerate(sorted_feedbacks[:5]):
         embed.add_field(name=f"#{idx+1} — {'⭐'*fb['sterne']}", value=f"**Kommentar:** {fb['kommentar']}\n*Datum:* <t:{int(fb['timestamp'])}:R>", inline=False)
         
     await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
@@ -1185,7 +1178,6 @@ class FeedbackModal(ui.Modal, title="Dein Feedback"):
         xp_erhalten = xp_map.get(self.sterne, 0)
         sterne_emojis = "⭐" * self.sterne
 
-        # Feedback in dict abspeichern (Persistenz)
         target_id_str = str(self.target_member.id)
         if target_id_str not in team_feedbacks:
             team_feedbacks[target_id_str] = []
@@ -1827,6 +1819,7 @@ async def dizzykontrolle(interaction: discord.Interaction, user: discord.Member)
         color=discord.Color.green()
     )
     
+    # Nachricht im Dizzy-Kanal (1527349819742355624) senden, die nach 1 Minute verschwindet
     await interaction.response.send_message(embed=embed)
     try:
         original_msg = await interaction.original_response()
@@ -1834,6 +1827,7 @@ async def dizzykontrolle(interaction: discord.Interaction, user: discord.Member)
     except Exception:
         pass
 
+    # Nachricht im Logs-Kanal (1532348593573199872) senden (bleibt dauerhaft erhalten)
     dizzy_log_kanal = interaction.guild.get_channel(DIZZY_LOG_KANAL_ID)
     if dizzy_log_kanal:
         log_embed = discord.Embed(
@@ -1846,11 +1840,7 @@ async def dizzykontrolle(interaction: discord.Interaction, user: discord.Member)
         log_embed.add_field(name="✨ Vergebene XP", value=f"`+{received_xp} XP`{boost_info}", inline=False)
         log_embed.set_footer(text="Sirius RP • Dizzykontroll-System")
 
-        log_msg = await dizzy_log_kanal.send(embed=log_embed)
-        try:
-            await log_msg.delete(delay=60)
-        except Exception:
-            pass
+        await dizzy_log_kanal.send(embed=log_embed)
 
 
 @bot.command(name="setupbewerbung")
