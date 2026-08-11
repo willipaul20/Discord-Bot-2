@@ -57,7 +57,6 @@ NEBEN_ROLLEN = [
 TEAM_NACHRICHTEN = {}
 benutzte_nachrichten = set()
 
-
 async def pruefe_und_kontrolliere(channel, user):
     gueltige_nachricht = None
 
@@ -72,7 +71,6 @@ async def pruefe_und_kontrolliere(channel, user):
 
     benutzte_nachrichten.add(gueltige_nachricht.id)
     return "Kontrolle erfolgreich durchgeführt!"
-
 
 # ==========================================
 # WAFFENSCHEIN SYSTEM
@@ -110,7 +108,6 @@ class WaffenscheinView(ui.View):
         super().__init__(timeout=None)
         self.add_item(WaffenscheinSelect())
 
-
 # ==========================================
 # HELPER FUNCTIONS & TEAMLISTE LOGIK
 # ==========================================
@@ -122,7 +119,6 @@ async def send_private_protocol(leader_user: discord.User, protocol_content: str
         print("Protokoll erfolgreich privat zugestellt.")
     except discord.Forbidden:
         print("Fehler: Der Gesprächsleiter hat DMs deaktiviert.")
-
 
 async def send_moderation_log(guild: discord.Guild, action_type: str, roblox_name: str, grund: str, dauer: str, moderator: str, avatar_url: str = None):
     kanal = guild.get_channel(1527349831444729868)
@@ -142,7 +138,6 @@ async def send_moderation_log(guild: discord.Guild, action_type: str, roblox_nam
     embed.set_footer(text="Sirius RP • Moderations-Log")
     await kanal.send(embed=embed)
 
-
 def formatiere_liste(mitglieder):
     if not mitglieder:
         return ""
@@ -154,7 +149,6 @@ def formatiere_liste(mitglieder):
         else:
             text += f"├ {member.mention}\n"
     return text
-
 
 async def generiere_team_embeds(guild: discord.Guild):
     embeds = []
@@ -310,7 +304,6 @@ async def generiere_team_embeds(guild: discord.Guild):
 
     return embeds
 
-
 # ==========================================
 # FLASK WEBSERVER FÜR KEEP-ALIVE
 # ==========================================
@@ -397,7 +390,11 @@ def load_data():
                 loaded_xp = {int(k): v for k, v in xp_raw.items()}
                 
                 raw_dizzy = data.get("durchgefuehrte_kontrollen", [])
-                loaded_dizzy = {(int(item[0]), int(item[1])) for item in raw_dizzy}
+                # Kompatibilität für alte (Mod-ID, Target-ID, Timestamp) oder neue (Mod-ID, Target-ID) Einträge
+                loaded_dizzy = set()
+                for item in raw_dizzy:
+                    if isinstance(item, list) and len(item) >= 2:
+                        loaded_dizzy.add((int(item[0]), int(item[1])))
 
                 raw_mod = data.get("moderation_eintraege", {})
                 loaded_mod = {k.lower(): v for k, v in raw_mod.items()}
@@ -438,14 +435,11 @@ xp_locks = {}
 active_xp_boost = None
 leaderboard_message_id = None
 
-
 def is_team_member(member: discord.Member) -> bool:
     return any(r.id == TEAM_ROLLE_ID for r in member.roles)
 
-
 def has_role(member: discord.Member, role_id: int) -> bool:
     return any(r.id == role_id for r in member.roles)
-
 
 def is_xp_locked(user_id: int) -> bool:
     if user_id in xp_locks:
@@ -456,7 +450,6 @@ def is_xp_locked(user_id: int) -> bool:
             if end_timestamp:
                 bot.loop.create_task(notify_xp_unlocked_automatically(user_id))
     return False
-
 
 async def notify_xp_unlocked_automatically(user_id: int):
     for guild in bot.guilds:
@@ -473,7 +466,6 @@ async def notify_xp_unlocked_automatically(user_id: int):
                 pass
             break
 
-
 def parse_duration(duration_str: str):
     match = re.match(r"^(\d+)\s*([mhdw])$", duration_str.strip().lower())
     if not match:
@@ -483,7 +475,6 @@ def parse_duration(duration_str: str):
     units_text = {'m': 'Minute(n)', 'h': 'Stunde(n)', 'd': 'Tag(en)', 'w': 'Woche(n)'}
     seconds = val * multipliers[unit]
     return seconds, f"{val} {units_text[unit]}"
-
 
 async def log_xp_action(guild: discord.Guild, user: discord.Member, amount: int, source: str, details: str = ""):
     kanal = guild.get_channel(XP_LOG_KANAL_ID)
@@ -501,7 +492,6 @@ async def log_xp_action(guild: discord.Guild, user: discord.Member, amount: int,
     embed.set_footer(text="Sirius RP • XP Logging")
     await kanal.send(embed=embed)
 
-
 async def log_xp_general_action(guild: discord.Guild, action_title: str, description: str):
     kanal = guild.get_channel(XP_LOG_KANAL_ID)
     if not kanal:
@@ -513,7 +503,6 @@ async def log_xp_general_action(guild: discord.Guild, action_title: str, descrip
     )
     embed.set_footer(text="Sirius RP • XP Logging")
     await kanal.send(embed=embed)
-
 
 def add_xp(user_id: int, base_points: int) -> int:
     if is_xp_locked(user_id) or base_points <= 0:
@@ -530,7 +519,6 @@ def add_xp(user_id: int, base_points: int) -> int:
     save_data()
     return final_points
 
-
 def get_sorted_xp_list(guild: discord.Guild):
     sorted_users = sorted(user_xp.items(), key=lambda x: x[1], reverse=True)
     valid_team_xp = []
@@ -539,7 +527,6 @@ def get_sorted_xp_list(guild: discord.Guild):
         if member and is_team_member(member):
             valid_team_xp.append((member, xp))
     return valid_team_xp
-
 
 def build_leaderboard_embed(guild: discord.Guild) -> discord.Embed:
     embed = discord.Embed(
@@ -560,7 +547,6 @@ def build_leaderboard_embed(guild: discord.Guild) -> discord.Embed:
     )
     return embed
 
-
 def get_roblox_user_id(username: str) -> int:
     try:
         user_res = requests.post(
@@ -575,7 +561,6 @@ def get_roblox_user_id(username: str) -> int:
     except Exception as e:
         print(f"Fehler beim Überprüfen des Roblox-Benutzers: {e}")
     return None
-
 
 def get_roblox_avatar_url(username: str) -> str:
     try:
@@ -592,7 +577,6 @@ def get_roblox_avatar_url(username: str) -> str:
     except Exception as e:
         print(f"Fehler beim Abrufen des Roblox-Avatars: {e}")
     return None
-
 
 @bot.tree.command(name="feedback-stats", description="Zeige die Feedback-Statistiken für ein Teammitglied an.")
 @app_commands.describe(user="Das Teammitglied")
@@ -633,7 +617,6 @@ async def feedback_stats(interaction: discord.Interaction, user: discord.Member)
         )
         log_embed.set_footer(text="Sirius RP • Logging")
         await log_kanal.send(embed=log_embed)
-
 
 class FeedbackRemoveReasonModal(ui.Modal, title="Grund für Feedback-Entfernung"):
     grund = ui.TextInput(
@@ -687,7 +670,6 @@ class FeedbackRemoveReasonModal(ui.Modal, title="Grund für Feedback-Entfernung"
 
         await interaction.followup.send("✅ Das Feedback wurde erfolgreich entfernt und die Stats/XP wurden aktualisiert.", ephemeral=True)
 
-
 class FeedbackRemoveSelect(ui.Select):
     def __init__(self, target_user: discord.Member, sorted_feedbacks_with_orig_idx: list):
         self.target_user = target_user
@@ -705,12 +687,10 @@ class FeedbackRemoveSelect(ui.Select):
         modal = FeedbackRemoveReasonModal(self.target_user, selected_orig_idx)
         await interaction.response.send_modal(modal)
 
-
 class FeedbackRemoveView(ui.View):
     def __init__(self, target_user: discord.Member, sorted_feedbacks_with_orig_idx: list):
         super().__init__(timeout=120)
         self.add_item(FeedbackRemoveSelect(target_user, sorted_feedbacks_with_orig_idx))
-
 
 @bot.tree.command(name="feedback-remove", description="Entferne ein Feedback eines Teammitglieds.")
 @app_commands.describe(user="Das Teammitglied")
@@ -743,7 +723,6 @@ async def feedback_remove(interaction: discord.Interaction, user: discord.Member
         
     await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
-
 class StartModal(discord.ui.Modal, title="Bewerbungsgespräch Starten"):
     applicant = discord.ui.TextInput(
         label="Bewerber (Name oder Mention)",
@@ -755,7 +734,6 @@ class StartModal(discord.ui.Modal, title="Bewerbungsgespräch Starten"):
         view = EvaluationView(interviewer=interaction.user, applicant_str=self.applicant.value)
         embed = view.get_current_embed()
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
-
 
 class NoteModal(discord.ui.Modal, title="Notiz zur Frage hinzufügen"):
     def __init__(self, eval_view, current_note=""):
@@ -779,7 +757,6 @@ class NoteModal(discord.ui.Modal, title="Notiz zur Frage hinzufügen"):
             
         await interaction.response.edit_message(embed=self.eval_view.get_current_embed(), view=self.eval_view)
 
-
 class FazitModal(discord.ui.Modal, title="Abschluss & Fazit"):
     fazit = discord.ui.TextInput(
         label="Fazit zum Bewerber",
@@ -795,7 +772,6 @@ class FazitModal(discord.ui.Modal, title="Abschluss & Fazit"):
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer()
         await self.eval_view.finish_evaluation(interaction, self.fazit.value)
-
 
 class EvaluationView(discord.ui.View):
     def __init__(self, interviewer, applicant_str):
@@ -898,7 +874,6 @@ class EvaluationView(discord.ui.View):
             view=None
         )
 
-
 class StartBewerbungView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -911,7 +886,6 @@ class StartBewerbungView(discord.ui.View):
             return
 
         await interaction.response.send_modal(StartModal())
-
 
 class VerifyView(ui.View):
     def __init__(self):
@@ -944,7 +918,6 @@ class VerifyView(ui.View):
         except Exception as e:
             await interaction.response.send_message(f"❌ Ein unerwarteter Fehler ist aufgetreten: {e}", ephemeral=True)
 
-
 class TimeSelectionModal(ui.Modal, title="Zeitauswahl & Eintrag"):
     username_input = ui.TextInput(label="Ihr Name", placeholder="z. B. Anna", required=True)
     hour_input = ui.TextInput(label="Stunde (00 bis 23)", placeholder="z.B. 14", min_length=1, max_length=2, required=True)
@@ -973,7 +946,6 @@ class TimeSelectionModal(ui.Modal, title="Zeitauswahl & Eintrag"):
         except Exception:
             await interaction.followup.send("❌ Etwas ist schiefgelaufen. Bitte stellen Sie sicher, dass die Stunde (0-23) und Minute (00, 15, 30, 45) korrekt eingegeben wurden.", ephemeral=True)
 
-
 class TimeLeaderboardView(ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -1001,7 +973,6 @@ class TimeLeaderboardView(ui.View):
         )
         await interaction.followup.send(embed=embed, ephemeral=True)
 
-
 class LeaderboardTop30View(ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -1025,7 +996,6 @@ class LeaderboardTop30View(ui.View):
             color=discord.Color.blue()
         )
         await interaction.followup.send(embed=embed, ephemeral=True)
-
 
 class ModerationEintragModal(ui.Modal):
     def __init__(self, typ: str):
@@ -1151,7 +1121,6 @@ class ModerationEintragModal(ui.Modal):
 
         await interaction.followup.send(embed=embed, ephemeral=True)
 
-
 class ModerationSelectView(ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -1170,7 +1139,6 @@ class ModerationSelectView(ui.View):
         chosen_type = select.values[0]
         await interaction.response.send_modal(ModerationEintragModal(typ=chosen_type))
 
-
 class SearchEintragModal(ui.Modal, title="Einträge abfragen"):
     roblox_name = ui.TextInput(label="Roblox Benutzername", placeholder="z.B. Max_RP123", required=True)
 
@@ -1187,7 +1155,6 @@ class SearchEintragModal(ui.Modal, title="Einträge abfragen"):
         view = SearchResultView(r_name=r_name)
         embed = view.build_embed()
         await interaction.followup.send(embed=embed, view=view, ephemeral=True)
-
 
 class DeleteEintragSelect(ui.Select):
     def __init__(self, r_name: str, eintraege: list):
@@ -1238,7 +1205,6 @@ class DeleteEintragSelect(ui.Select):
             await interaction.followup.send(f"✅ Eintrag **#{idx+1} ({removed['typ']})** für **{self.r_name}** wurde erfolgreich entfernt und in den Logs festgehalten.", ephemeral=True)
         else:
             await interaction.followup.send("❌ Dieser Eintrag existiert nicht mehr.", ephemeral=True)
-
 
 class SearchResultView(ui.View):
     def __init__(self, r_name: str = ""):
@@ -1300,7 +1266,6 @@ class SearchResultView(ui.View):
         embed.set_footer(text="Sirius RP • Moderations-Datenbank")
         return embed
 
-
 class SetupEintragView(ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -1320,7 +1285,6 @@ class SetupEintragView(ui.View):
             await interaction.response.send_message("❌ Du hast keine Berechtigung, dieses Tool zu nutzen!", ephemeral=True)
             return
         await interaction.response.send_modal(SearchEintragModal())
-
 
 class BanBoloAbschliessenView(ui.View):
     def __init__(self, roblox_name: str = ""):
@@ -1352,7 +1316,6 @@ class BanBoloAbschliessenView(ui.View):
             await bolo_log_kanal.send(embed=b_embed)
 
         await interaction.followup.send(f"✅ Die Ban Bolo für **{self.roblox_name}** wurde erfolgreich abgeschlossen und entfernt.", ephemeral=True)
-
 
 class BanBoloMainView(ui.View):
     def __init__(self):
@@ -1392,7 +1355,6 @@ class BanBoloMainView(ui.View):
             embed.set_footer(text="Sirius RP • Sicherheitssystem")
             view = BanBoloAbschliessenView(roblox_name=r_name)
             await interaction.followup.send(embed=embed, view=view, ephemeral=True)
-
 
 class FeedbackModal(ui.Modal, title="Dein Feedback"):
     grund_input = ui.TextInput(
@@ -1459,7 +1421,6 @@ class FeedbackModal(ui.Modal, title="Dein Feedback"):
             ephemeral=True
         )
 
-
 class FeedbackStepView(ui.View):
     def __init__(self):
         super().__init__(timeout=120)
@@ -1506,7 +1467,6 @@ class FeedbackStepView(ui.View):
         sterne = int(select.values[0])
         await interaction.response.send_modal(FeedbackModal(sterne=sterne, target_member=self.selected_member))
 
-
 class StartFeedbackView(ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -1517,7 +1477,6 @@ class StartFeedbackView(ui.View):
             await interaction.response.send_message("❌ Teammitglieder dürfen kein Feedback abgeben!", ephemeral=True)
             return
         await interaction.response.send_message("Bitte wähle zuerst das Teammitglied und anschließend die Sterne aus:", view=FeedbackStepView(), ephemeral=True)
-
 
 class AdminAcceptView(ui.View):
     def __init__(self, requester_user: discord.User = None, roblox_name: str = "", ort: str = "", grund: str = ""):
@@ -1585,7 +1544,6 @@ class AdminAcceptView(ui.View):
 
         await interaction.followup.send("✅ Call angenommen!", ephemeral=True)
 
-
 class CallAdminModal(ui.Modal, title="Admin Rufen"):
     roblox_name = ui.TextInput(label="Dein Roblox Benutzername", placeholder="z.B. Max_RP123", required=True)
     ort = ui.TextInput(label="Wo befindest du dich aktuell?", placeholder="z.B. Würfelpark", required=True)
@@ -1633,7 +1591,6 @@ class CallAdminModal(ui.Modal, title="Admin Rufen"):
                 c_log_embed.set_thumbnail(url=avatar_url)
             await call_log_kanal.send(embed=c_log_embed)
 
-
 class StartCallAdminView(ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -1641,7 +1598,6 @@ class StartCallAdminView(ui.View):
     @ui.button(label="Admin rufen", style=discord.ButtonStyle.danger, emoji="👤", custom_id="start_call_admin_btn")
     async def start_call(self, interaction: discord.Interaction, button: ui.Button):
         await interaction.response.send_modal(CallAdminModal())
-
 
 @bot.event
 async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
@@ -1669,7 +1625,6 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
         if not before.channel or before.channel.id not in ALLOWED_VOICE_CHANNELS:
             voice_join_times[member.id] = time.time()
 
-
 @tasks.loop(seconds=15)
 async def check_expired_boosts():
     global active_xp_boost
@@ -1687,7 +1642,6 @@ async def check_expired_boosts():
             await boost_channel.send(embed=embed)
             await log_xp_general_action(boost_channel.guild, "XP Boost abgelaufen", "Der aktive XP-Boost ist regulär abgelaufen.")
         active_xp_boost = None
-
 
 @tasks.loop(seconds=60)
 async def check_voice_xp():
@@ -1728,7 +1682,6 @@ async def check_voice_xp():
             fullmute_timers.pop(user_id, None)
             fullmute_warned.discard(user_id)
 
-
 async def refresh_leaderboard_in_channel():
     global leaderboard_message_id
     kanal = bot.get_channel(LEADERBOARD_KANAL_ID)
@@ -1752,7 +1705,6 @@ async def refresh_leaderboard_in_channel():
     except Exception as e:
         print(f"Fehler beim Aktualisieren des Leaderboards: {e}")
 
-
 @bot.event
 async def on_member_update(before, after):
     if before.roles != after.roles:
@@ -1765,7 +1717,6 @@ async def on_member_update(before, after):
             except Exception as e:
                 print(f"Fehler beim Aktualisieren der Teamliste: {e}")
 
-
 @bot.event
 async def on_member_remove(member):
     guild = member.guild
@@ -1776,7 +1727,6 @@ async def on_member_remove(member):
             await msg.edit(embeds=embeds)
         except Exception as e:
             print(f"Fehler beim Aktualisieren nach Austritt/Kick: {e}")
-
 
 @bot.event
 async def on_ready():
@@ -1808,7 +1758,6 @@ async def on_ready():
         
     print(f'Erfolg! Eingeloggt as {bot.user}')
 
-
 @bot.event
 async def on_message(message: discord.Message):
     if message.author.bot or not message.guild:
@@ -1833,7 +1782,6 @@ async def on_message(message: discord.Message):
             await refresh_leaderboard_in_channel()
 
     await bot.process_commands(message)
-
 
 @bot.command()
 async def setupwaffenschein(ctx):
@@ -1862,7 +1810,6 @@ async def setupwaffenschein(ctx):
     except Exception:
         pass
 
-
 @bot.tree.command(
     name="teamliste-setup",
     description="Postet die Teamliste und hält sie automatisch aktuell.",
@@ -1878,7 +1825,6 @@ async def teamliste_setup(interaction: discord.Interaction):
     msg = await interaction.channel.send(embeds=embeds)
     TEAM_NACHRICHTEN[interaction.guild.id] = msg
     await interaction.followup.send("Teamliste erfolgreich erstellt!", ephemeral=True)
-
 
 @bot.tree.command(name="xp-add", description="Füge einem Teammitglied XP hinzu.")
 @app_commands.describe(user="Das Teammitglied", amount="Anzahl der XP")
@@ -1899,7 +1845,6 @@ async def xp_add_cmd(interaction: discord.Interaction, user: discord.Member, amo
     await refresh_leaderboard_in_channel()
     await interaction.response.send_message(f"✅ Dem Teammitglied {user.mention} wurden **+{amount} XP** hinzugefügt.", ephemeral=True)
 
-
 @bot.tree.command(name="xp-remove", description="Entferne einem Teammitglied XP.")
 @app_commands.describe(user="Das Teammitglied", amount="Anzahl der XP")
 async def xp_remove(interaction: discord.Interaction, user: discord.Member, amount: int):
@@ -1918,7 +1863,6 @@ async def xp_remove(interaction: discord.Interaction, user: discord.Member, amou
     await log_xp_general_action(interaction.guild, "XP Entfernt", f"Teammitglied {user.mention} wurden `{amount} XP` von {interaction.user.mention} abgezogen.")
     await refresh_leaderboard_in_channel()
     await interaction.response.send_message(f"✅ Dem Teammitglied {user.mention} wurden **-{amount} XP** abgezogen (Aktuell: {new_val} XP).", ephemeral=True)
-
 
 @bot.tree.command(name="xp-lock", description="Sperre die XP-Einnahme eines Teammitglieds für eine bestimmte Zeit.")
 @app_commands.describe(user="Das Teammitglied", duration="Dauer (z.B. 30m, 2h, 1d)", grund="Grund für den XP-Lock")
@@ -1947,7 +1891,6 @@ async def xp_lock(interaction: discord.Interaction, user: discord.Member, durati
 
     await log_xp_general_action(interaction.guild, "XP Lock", f"Benutzer {user.mention} wurde von {interaction.user.mention} für `{readable}` gesperrt.\n**Grund:** {grund}")
 
-
 @bot.tree.command(name="xp-unlock", description="Entsperre die XP-Einnahme eines Teammitglieds manuell.")
 @app_commands.describe(user="Das Teammitglied", grund="Grund für das Entsperren")
 async def xp_unlock(interaction: discord.Interaction, user: discord.Member, grund: str):
@@ -1965,7 +1908,6 @@ async def xp_unlock(interaction: discord.Interaction, user: discord.Member, grun
         await log_xp_general_action(interaction.guild, "XP Unlock", f"Sperre für {user.mention} wurde von {interaction.user.mention} aufgehoben.\n**Grund:** {grund}")
     else:
         await interaction.response.send_message(f"ℹ️ {user.mention} hat aktuell keine aktive XP-Sperre.", ephemeral=True)
-
 
 @bot.tree.command(name="xp-boost", description="Aktiviere einen XP Boost für unsere Teammitglieder.")
 @app_commands.describe(percentage="Prozentzahl des Boosts (z.B. 50 for +50%)", duration="Dauer (z.B. 2h, 1d)")
@@ -2005,7 +1947,6 @@ async def xp_boost(interaction: discord.Interaction, percentage: int, duration: 
 
     await log_xp_general_action(interaction.guild, "XP Boost Aktiviert", f"Ein XP-Boost von `+{percentage}%` für `{readable}` wurde von {interaction.user.mention} gestartet.")
 
-
 @bot.tree.command(name="boost-stop", description="Stoppe den aktuell laufenden XP-Boost.")
 async def boost_stop(interaction: discord.Interaction):
     if not has_role(interaction.user, XP_BOOST_LOCK_ROLLE_ID) and not interaction.user.guild_permissions.administrator:
@@ -2035,7 +1976,6 @@ async def boost_stop(interaction: discord.Interaction):
 
     await log_xp_general_action(interaction.guild, "XP Boost Gestoppt", f"Der aktive XP-Boost wurde vorzeitig von {interaction.user.mention} gestoppt.")
 
-
 @bot.tree.command(name="xp-stats", description="Zeige deine eigenen XP oder die eines anderen Teammitglieds an.")
 @app_commands.describe(user="Das Teammitglied (optional)")
 async def xp_stats(interaction: discord.Interaction, user: discord.Member = None):
@@ -2059,7 +1999,6 @@ async def xp_stats(interaction: discord.Interaction, user: discord.Member = None
 
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
-
 @bot.tree.command(name="xp-reset", description="Setze die XP aller Teammitglieder komplett zurück.")
 async def xp_reset(interaction: discord.Interaction):
     if not interaction.user.guild_permissions.administrator:
@@ -2071,7 +2010,6 @@ async def xp_reset(interaction: discord.Interaction):
     await log_xp_general_action(interaction.guild, "XP Reset", f"Das gesamte XP-Leaderboard wurde von {interaction.user.mention} zurückgesetzt.")
     await refresh_leaderboard_in_channel()
     await interaction.response.send_message("🗑️ Das gesamte XP-Leaderboard wurde erfolgreich zurückgesetzt.", ephemeral=True)
-
 
 @bot.tree.command(name="dizzykontrolle", description="Führe eine Dizzykontrolle für ein Mitglied durch.")
 @app_commands.describe(user="Wähle das Mitglied aus, das kontrolliert wurde")
@@ -2140,7 +2078,6 @@ async def dizzykontrolle(interaction: discord.Interaction, user: discord.Member)
 
         await dizzy_log_kanal.send(embed=log_embed)
 
-
 @bot.command(name="setupbewerbung")
 @commands.has_permissions(administrator=True)
 async def setup_bewerbung(ctx):
@@ -2157,7 +2094,6 @@ async def setup_bewerbung(ctx):
 
     view = StartBewerbungView()
     await ctx.send(embed=embed, view=view)
-
 
 @bot.command()
 @commands.has_permissions(administrator=True)
@@ -2187,7 +2123,6 @@ async def setupverify(ctx):
     await kanal.send(embed=embed, view=VerifyView())
     await ctx.send("✅ Verify-Panel erfolgreich im Zielkanal gesendet!")
 
-
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def setupeintrag(ctx):
@@ -2203,7 +2138,6 @@ async def setupeintrag(ctx):
     )
     await kanal.send(embed=embed, view=SetupEintragView())
     await ctx.send("✅ Eintrag-Panel gesendet!")
-
 
 @bot.command()
 @commands.has_permissions(administrator=True)
@@ -2221,7 +2155,6 @@ async def setupbanbolo(ctx):
     await kanal.send(embed=embed, view=BanBoloMainView())
     await ctx.send("✅ Ban Bolo Panel gesendet!")
 
-
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def setupleaderboard(ctx):
@@ -2236,47 +2169,70 @@ async def setupleaderboard(ctx):
     
     global leaderboard_message_id
     leaderboard_message_id = msg.id
-    await ctx.send("✅ Leaderboard gesendet!")
-
+    await ctx.send("✅ Leaderboard-Panel erfolgreich gesendet!")
 
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def setupfeedback(ctx):
     kanal = bot.get_channel(FEEDBACK_PANEL_KANAL_ID)
     if not kanal:
-        await ctx.send("❌ Feedback-Kanal nicht gefunden!")
+        await ctx.send("❌ Feedback-Panel-Kanal wurde nicht gefunden!")
         return
+
     embed = discord.Embed(
-        title="⭐ Feedback geben - Sirius RP 💛",
-        description="Drücke unten auf **\"Feedback geben\"** und bewerte die Leistung eines Teammitglieds.",
+        title="⭐ Team-Feedback — Sirius RP",
+        description=(
+            "Bewerte hier unsere Teammitglieder!\n\n"
+            "Klicke unten auf den Button, wähle das entsprechende Teammitglied sowie die Anzahl der Sterne aus "
+            "und hinterlasse einen kurzen Kommentar.\n\n"
+            "**Hinweis:** Teammitglieder können sich selbst kein Feedback geben und keine Feedbacks abgeben."
+        ),
         color=discord.Color.gold()
     )
-    await kanal.send(embed=embed, view=StartFeedbackView())
-    await ctx.send("✅ Feedback-Panel gesendet!")
+    embed.set_footer(text="Sirius RP • Feedback-System")
 
+    await kanal.send(embed=embed, view=StartFeedbackView())
+    await ctx.send("✅ Feedback-Panel erfolgreich gesendet!")
 
 @bot.command()
 @commands.has_permissions(administrator=True)
-async def setupadmin(ctx):
+async def setupcalladmin(ctx):
+    kanal = bot.get_channel(CALL_ADMIN_KANAL_ID)
+    if not kanal:
+        await ctx.send("❌ Call-Admin-Kanal nicht gefunden!")
+        return
+
     embed = discord.Embed(
-        title="Admin Rufen (Ingame Support)",
-        description="> Du brauchst Ingame einen Administrator?\n> Fülle das Formular unter der Nachricht aus.",
+        title="📞 Admin rufen — Sirius RP",
+        description=(
+            "Benötigst du Unterstützung von einem Administrator im Spiel?\n\n"
+            "Klicke unten auf den Button **\"Admin rufen\"**, fülle das Formular mit deinem Roblox-Namen, "
+            "deinem aktuellen Ort und deinem Problem aus, damit unser Team dir schnellstmöglich helfen kann."
+        ),
         color=discord.Color.red()
     )
-    await ctx.send(embed=embed, view=StartCallAdminView())
-    await ctx.send("✅ Admin-Rufen Panel gesendet!")
+    embed.set_footer(text="Sirius RP • Call-Admin-System")
 
+    await kanal.send(embed=embed, view=StartCallAdminView())
+    await ctx.send("✅ Call-Admin-Panel erfolgreich gesendet!")
 
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def setuptimeleaderboard(ctx):
+    kanal = bot.get_channel(LEADERBOARD_KANAL_ID)
+    if not kanal:
+        await ctx.send("❌ Leaderboard-Kanal nicht gefunden!")
+        return
+
     embed = discord.Embed(
-        title="⏰ Zeitauswahl & Leaderboard",
-        description="Klicke unten auf den Button, um deine Wunschzeit (Stunden & Minuten) einzutragen, oder betrachte das aktuelle Leaderboard.",
+        title="⏰ Zeitauswahl-System",
+        description="Klicke auf den Button unten, um deine Uhrzeit in das Zeitauswahl-Leaderboard einzutragen oder das aktuelle Leaderboard einzusehen.",
         color=discord.Color.blue()
     )
-    await ctx.send(embed=embed, view=TimeLeaderboardView())
-    await ctx.send("✅ Zeitauswahl-Leaderboard Panel gesendet!")
+    await kanal.send(embed=embed, view=TimeLeaderboardView())
+    await ctx.send("✅ Zeitauswahl-Panel gesendet!")
 
-
+# ==========================================
+# BOT STARTEN
+# ==========================================
 bot.run(os.getenv("DISCORD_TOKEN"))
