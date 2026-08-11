@@ -67,7 +67,7 @@ async def pruefe_und_kontrolliere(channel, user):
                 break
 
     if not gueltige_nachricht:
-        return "Die Person hat keine verfügbare Nachricht im Chat! Sie muss erst etwas Neues schreiben."
+        return "Die Person has keine verfügbare Nachricht im Chat! Sie muss erst etwas Neues schreiben."
 
     benutzte_nachrichten.add(gueltige_nachricht.id)
     return "Kontrolle erfolgreich durchgeführt!"
@@ -390,7 +390,6 @@ def load_data():
                 loaded_xp = {int(k): v for k, v in xp_raw.items()}
                 
                 raw_dizzy = data.get("durchgefuehrte_kontrollen", [])
-                # Kompatibilität für alte (Mod-ID, Target-ID, Timestamp) oder neue (Mod-ID, Target-ID) Einträge
                 loaded_dizzy = set()
                 for item in raw_dizzy:
                     if isinstance(item, list) and len(item) >= 2:
