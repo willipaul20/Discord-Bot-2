@@ -20,6 +20,43 @@ RELOAD_COMMAND_ROLLE_ID = 1527739219907449022
 KLEINER_WAFFENSCHEIN_ROLLE_ID = 1527349817586483220
 GROSSER_WAFFENSCHEIN_ROLLE_ID = 1527349817586483221
 
+# --- ROLLEN-KONFIGURATION (TEAMLISTE) ---
+HAUPT_ROLLEN = [
+    1527739219907449022,  # ♛ || Discord Inhaber
+    1527349818068959301,  # 👑 || Inhaber
+    1527349818068959300,  # 👑 || Stv. Inhaber
+    1527349818068959299,  # 💠 || Projektleitung
+    1527349818068959298,  # 💠 || Stv. Projektleitung
+    1527349818068959297,  # 🔘 || Projektverwaltung
+    1527349818068959296,  # 🪙 || Serverleitung
+    1527349818068959295,  # 🪙 || Stv. Serverleitung
+    1527349818068959293,  # 🗿 || Teamleitung
+    1527349818068959292,  # 🗿 || Stv. Teamleitung
+    1527349818031214721,  # 🏅 || Manager
+    1527349818031214720,  # 🏅 || Stv. Manager
+    1527349818031214719,  # ✨️ || Supervisor
+    1527349817875890355,  # 🤖 || Developer
+    1527349817800523855,  # 🪖 || Sr. Admin
+    1527349817800523854,  # 🪖 || Admin
+    1527349817800523853,  # 🪖 || Jr. Admin
+    1527349817800523851,  # ⚔️ || Sr. Moderator
+    1527349817800523850,  # ⚔️ || Moderator
+    1527349817800523849,  # ⚔️ || Jr. Moderator
+    1527349817800523847,  # 🔰 || Sr. Supporter
+    1527349817708122191,  # 🔰 || Supporter
+    1527349817708122190,  # 🔰 || Test Supporter
+]
+
+NEBEN_ROLLEN = [
+    1528123954659590154,  # 🌟 || Teamausbilder
+    1527427465436205187,  # 🏭 || Fraktionsverwaltung
+    1527427414907687022,  # 🎉 || Event Manager
+    1527426915214950550,  # 💜 || Community Managment
+]
+
+# Speichert die Nachricht-Referenzen für automatische Updates der Teamliste
+TEAM_NACHRICHTEN = {}
+
 # ==========================================
 # WAFFENSCHEIN SYSTEM
 # ==========================================
@@ -58,7 +95,7 @@ class WaffenscheinView(ui.View):
 
 
 # ==========================================
-# HELPER FUNCTIONS
+# HELPER FUNCTIONS & TEAMLISTE LOGIK
 # ==========================================
 async def send_private_protocol(leader_user: discord.User, protocol_content: str):
     """Sendet das fertig gestellte Protokoll privat per DM an den Gesprächsleiter."""
@@ -89,6 +126,181 @@ async def send_moderation_log(guild: discord.Guild, action_type: str, roblox_nam
         embed.set_thumbnail(url=avatar_url)
     embed.set_footer(text="Sirius RP • Moderations-Log")
     await kanal.send(embed=embed)
+
+
+def formatiere_liste(mitglieder):
+    """Formatiert eine Liste von Mitgliedern im Baum-Design."""
+    if not mitglieder:
+        return ""
+
+    text = ""
+    for i, member in enumerate(mitglieder):
+        if i == len(mitglieder) - 1:
+            text += f"└ {member.mention}\n"
+        else:
+            text += f"├ {member.mention}\n"
+    return text
+
+
+async def generiere_team_embeds(guild: discord.Guild):
+    embeds = []
+
+    # 1. Block: Leitungsteam (Blau)
+    leitung_ids = [
+        1527739219907449022,
+        1527349818068959301,
+        1527349818068959300,
+        1527349818068959299,
+        1527349818068959298,
+        1527349818068959297,
+        1527349818068959296,
+        1527349818068959295,
+    ]
+    embed_leitung = discord.Embed(
+        title="Teamliste | Sirius RP 📰", color=discord.Color.blue()
+    )
+    content_leitung = "## ▬▬ 👑Leitungsteam ▬▬\n"
+    for r_id in leitung_ids:
+        role = guild.get_role(r_id)
+        if role:
+            gueltige_mitglieder = []
+            for m in role.members:
+                user_hauptrollen = [
+                    guild.get_role(rid) for rid in HAUPT_ROLLEN if guild.get_role(rid) in m.roles
+                ]
+                if user_hauptrollen and user_hauptrollen[0] == role:
+                    gueltige_mitglieder.append(m)
+
+            content_leitung += f"**{role.name}**\n"
+            formatted = formatiere_liste(gueltige_mitglieder)
+            if formatted:
+                content_leitung += formatted
+            content_leitung += "\n"
+    embed_leitung.description = content_leitung
+    embeds.append(embed_leitung)
+
+    # 2. Block: Führungsteam (Blau)
+    fuehrung_ids = [
+        1527349818068959293,
+        1527349818068959292,
+        1527349818031214721,
+        1527349818031214720,
+        1527349818031214719,
+        1527349817875890355,
+    ]
+    embed_fuehrung = discord.Embed(color=discord.Color.blue())
+    content_fuehrung = "## ▬▬ 👨‍💼Führungsteam ▬▬\n"
+    for r_id in fuehrung_ids:
+        role = guild.get_role(r_id)
+        if role:
+            gueltige_mitglieder = []
+            for m in role.members:
+                user_hauptrollen = [
+                    guild.get_role(rid) for rid in HAUPT_ROLLEN if guild.get_role(rid) in m.roles
+                ]
+                if user_hauptrollen and user_hauptrollen[0] == role:
+                    gueltige_mitglieder.append(m)
+
+            content_fuehrung += f"**{role.name}**\n"
+            formatted = formatiere_liste(gueltige_mitglieder)
+            if formatted:
+                content_fuehrung += formatted
+            content_fuehrung += "\n"
+    embed_fuehrung.description = content_fuehrung
+    embeds.append(embed_fuehrung)
+
+    # 3. Block: Admin-Team (Blau)
+    admin_ids = [
+        1527349817800523855,
+        1527349817800523854,
+        1527349817800523853,
+    ]
+    embed_admin = discord.Embed(color=discord.Color.blue())
+    content_admin = "## ▬▬ ⚙️Admin-Team ▬▬\n"
+    for r_id in admin_ids:
+        role = guild.get_role(r_id)
+        if role:
+            gueltige_mitglieder = []
+            for m in role.members:
+                user_hauptrollen = [
+                    guild.get_role(rid) for rid in HAUPT_ROLLEN if guild.get_role(rid) in m.roles
+                ]
+                if user_hauptrollen and user_hauptrollen[0] == role:
+                    gueltige_mitglieder.append(m)
+
+            content_admin += f"**{role.name}**\n"
+            formatted = formatiere_liste(gueltige_mitglieder)
+            if formatted:
+                content_admin += formatted
+            content_admin += "\n"
+    embed_admin.description = content_admin
+    embeds.append(embed_admin)
+
+    # 4. Block: Moderations-Team (Blau)
+    mod_ids = [1527349817800523851, 1527349817800523850, 1527349817800523849]
+    embed_mod = discord.Embed(color=discord.Color.blue())
+    content_mod = "## ▬▬ ⚖️Moderations-Team ▬▬\n"
+    for r_id in mod_ids:
+        role = guild.get_role(r_id)
+        if role:
+            gueltige_mitglieder = []
+            for m in role.members:
+                user_hauptrollen = [
+                    guild.get_role(rid) for rid in HAUPT_ROLLEN if guild.get_role(rid) in m.roles
+                ]
+                if user_hauptrollen and user_hauptrollen[0] == role:
+                    gueltige_mitglieder.append(m)
+
+            content_mod += f"**{role.name}**\n"
+            formatted = formatiere_liste(gueltige_mitglieder)
+            if formatted:
+                content_mod += formatted
+            content_mod += "\n"
+    embed_mod.description = content_mod
+    embeds.append(embed_mod)
+
+    # 5. Block: Support-Team (Blau)
+    supp_ids = [
+        1527349817800523847,
+        1527349817708122191,
+        1527349817708122190,
+    ]
+    embed_supp = discord.Embed(color=discord.Color.blue())
+    content_supp = "## ▬▬ 🛡️Support-Team ▬▬\n"
+    for r_id in supp_ids:
+        role = guild.get_role(r_id)
+        if role:
+            gueltige_mitglieder = []
+            for m in role.members:
+                user_hauptrollen = [
+                    guild.get_role(rid) for rid in HAUPT_ROLLEN if guild.get_role(rid) in m.roles
+                ]
+                if user_hauptrollen and user_hauptrollen[0] == role:
+                    gueltige_mitglieder.append(m)
+
+            content_supp += f"**{role.name}**\n"
+            formatted = formatiere_liste(gueltige_mitglieder)
+            if formatted:
+                content_supp += formatted
+            content_supp += "\n"
+    embed_supp.description = content_supp
+    embeds.append(embed_supp)
+
+    # 6. Block: Nebenrollen (Gelb - Mehrfachnennung erlaubt)
+    embed_neben = discord.Embed(color=discord.Color.gold())
+    content_neben = "## ▬▬ 🚀Nebenrollen ▬▬\n"
+    for r_id in NEBEN_ROLLEN:
+        role = guild.get_role(r_id)
+        if role:
+            content_neben += f"**{role.name}**\n"
+            formatted = formatiere_liste(list(role.members))
+            if formatted:
+                content_neben += formatted
+            content_neben += "\n"
+    embed_neben.description = content_neben
+    embeds.append(embed_neben)
+
+    return embeds
 
 
 # ==========================================
@@ -1563,6 +1775,32 @@ async def refresh_leaderboard_in_channel():
         print(f"Fehler beim Aktualisieren des Leaderboards: {e}")
 
 
+# --- EVENT: AUTOMATISCHES UPDATE DER TEAMLISTE ---
+@bot.event
+async def on_member_update(before, after):
+    if before.roles != after.roles:
+        guild = after.guild
+        if guild.id in TEAM_NACHRICHTEN:
+            try:
+                msg = TEAM_NACHRICHTEN[guild.id]
+                embeds = await generiere_team_embeds(guild)
+                await msg.edit(embeds=embeds)
+            except Exception as e:
+                print(f"Fehler beim Aktualisieren der Teamliste: {e}")
+
+
+@bot.event
+async def on_member_remove(member):
+    guild = member.guild
+    if guild.id in TEAM_NACHRICHTEN:
+        try:
+            msg = TEAM_NACHRICHTEN[guild.id]
+            embeds = await generiere_team_embeds(guild)
+            await msg.edit(embeds=embeds)
+        except Exception as e:
+            print(f"Fehler beim Aktualisieren nach Austritt/Kick: {e}")
+
+
 @bot.event
 async def on_ready():
     bot.add_view(LeaderboardTop30View())
@@ -1575,7 +1813,7 @@ async def on_ready():
     bot.add_view(TimeLeaderboardView())
     bot.add_view(VerifyView())
     bot.add_view(StartBewerbungView())
-    bot.add_view(WaffenscheinView()) # Hier für die Waffenschein-Persistence hinzugefügt
+    bot.add_view(WaffenscheinView())
 
     try:
         synced = await bot.tree.sync()
@@ -1621,7 +1859,7 @@ async def on_message(message: discord.Message):
 
 
 # ==========================================
-# NEUER BEFEHL: !setupwaffenschein
+# WAFFENSCHEIN & TEAMLISTE SETUP COMMANDS
 # ==========================================
 
 @bot.command()
@@ -1650,6 +1888,23 @@ async def setupwaffenschein(ctx):
         await ctx.message.delete()
     except Exception:
         pass
+
+
+@bot.tree.command(
+    name="teamliste-setup",
+    description="Postet die Teamliste und hält sie automatisch aktuell.",
+)
+async def teamliste_setup(interaction: discord.Interaction):
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("❌ Du hast keine Berechtigung für diesen Befehl!", ephemeral=True)
+        return
+
+    await interaction.response.defer(thinking=True)
+    embeds = await generiere_team_embeds(interaction.guild)
+
+    msg = await interaction.channel.send(embeds=embeds)
+    TEAM_NACHRICHTEN[interaction.guild.id] = msg
+    await interaction.followup.send("Teamliste erfolgreich erstellt!", ephemeral=True)
 
 
 # ==========================================
