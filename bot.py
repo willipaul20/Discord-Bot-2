@@ -437,27 +437,27 @@ class FeedbackRemoveReasonModal(ui.Modal, title="Grund für Feedback-Entfernung"
 
 
 class FeedbackRemoveSelect(ui.Select):
-    def __init__(self, target_user: discord.Member, feedbacks: list):
+    def __init__(self, target_user: discord.Member, sorted_feedbacks_with_orig_idx: list):
         self.target_user = target_user
         options = []
-        for idx, fb in enumerate(feedbacks):
+        for display_idx, (orig_idx, fb) in enumerate(sorted_feedbacks_with_orig_idx):
             stars_str = "⭐" * fb["sterne"]
-            label = f"#{idx+1} | {stars_str} | Von: {fb['autor_name']}"
+            label = f"#{display_idx+1} | {stars_str} | Von: {fb['autor_name']}"
             desc = fb["kommentar"][:75] if len(fb["kommentar"]) > 75 else fb["kommentar"]
-            options.append(discord.SelectOption(label=label[:100], value=str(idx), description=desc[:100]))
+            options.append(discord.SelectOption(label=label[:100], value=str(orig_idx), description=desc[:100]))
             
         super().__init__(placeholder="Wähle das zu entfernende Feedback aus...", min_values=1, max_values=1, options=options)
 
     async def callback(self, interaction: discord.Interaction):
-        selected_idx = int(self.values[0])
-        modal = FeedbackRemoveReasonModal(self.target_user, selected_idx)
+        selected_orig_idx = int(self.values[0])
+        modal = FeedbackRemoveReasonModal(self.target_user, selected_orig_idx)
         await interaction.response.send_modal(modal)
 
 
 class FeedbackRemoveView(ui.View):
-    def __init__(self, target_user: discord.Member, feedbacks: list):
+    def __init__(self, target_user: discord.Member, sorted_feedbacks_with_orig_idx: list):
         super().__init__(timeout=120)
-        self.add_item(FeedbackRemoveSelect(target_user, feedbacks))
+        self.add_item(FeedbackRemoveSelect(target_user, sorted_feedbacks_with_orig_idx))
 
 
 @bot.tree.command(name="feedback-remove", description="Entferne ein Feedback eines Teammitglieds.")
@@ -476,16 +476,18 @@ async def feedback_remove(interaction: discord.Interaction, user: discord.Member
         await interaction.response.send_message(f"ℹ️ Für {user.display_name} sind keine Feedbacks im System hinterlegt.", ephemeral=True)
         return
 
-    sorted_feedbacks = sorted(feedbacks, key=lambda x: x["timestamp"], reverse=True)
+    # Verknüpfe jedes Feedback mit seinem echten (ursprünglichen) Index aus der Liste vor dem Sortieren
+    feedbacks_with_orig_idx = list(enumerate(feedbacks))
+    sorted_feedbacks_with_orig_idx = sorted(feedbacks_with_orig_idx, key=lambda x: x[1]["timestamp"], reverse=True)
 
-    view = FeedbackRemoveView(user, sorted_feedbacks)
+    view = FeedbackRemoveView(user, sorted_feedbacks_with_orig_idx)
     
     embed = discord.Embed(
         title=f"🗑️ Feedback entfernen: {user.display_name}",
         description="Wähle im Dropdown-Menü unten das Feedback aus, welches du entfernen möchtest. (Neu nach Alt sortiert)",
         color=discord.Color.red()
     )
-    for idx, fb in enumerate(sorted_feedbacks[:5]):
+    for idx, (orig_idx, fb) in enumerate(sorted_feedbacks_with_orig_idx[:5]):
         embed.add_field(name=f"#{idx+1} — {'⭐'*fb['sterne']}", value=f"**Kommentar:** {fb['kommentar']}\n*Datum:* <t:{int(fb['timestamp'])}:R>", inline=False)
         
     await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
