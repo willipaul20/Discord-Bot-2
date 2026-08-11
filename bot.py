@@ -345,6 +345,8 @@ LOG_KANAL_ID = 1532091859285966868
 CALL_ADMIN_KANAL_ID = 1532102652790444123
 CALL_ADMIN_TEAM_ROLLE_ID = 1532109458157862932
 DIZZY_KANAL_ID = 1527349819742355624
+DIZZY_COOLDOWN_SECONDS = 5 * 60
+DIZZY_HISTORY_LIMIT = 200
 ALLOWED_VOICE_CHANNELS = [1527349830228246701, 1527349830228246702]
 LEADERBOARD_KANAL_ID = 1532118592177569822
 XP_BOOST_ANNOUNCEMENT_KANAL_ID = 1527677485960007680
@@ -386,53 +388,90 @@ def load_data():
         try:
             with open(DATA_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                xp_raw = data.get("user_xp", {})
-                loaded_xp = {int(k): v for k, v in xp_raw.items()}
-                
-                raw_dizzy = data.get("durchgefuehrte_kontrollen", [])
-                loaded_dizzy = set()
-                for item in raw_dizzy:
-                    if isinstance(item, list) and len(item) >= 2:
-                        loaded_dizzy.add((int(item[0]), int(item[1])))
-
-                raw_mod = data.get("moderation_eintraege", {})
-                loaded_mod = {k.lower(): v for k, v in raw_mod.items()}
-
-                raw_feedbacks = data.get("team_feedbacks", {})
-                loaded_feedbacks = {int(k): v for k, v in raw_feedbacks.items()}
-
-                return loaded_xp, loaded_mod, data.get("active_ban_bolos", []), loaded_dizzy, data.get("time_leaderboard", []), loaded_feedbacks
+            loaded_xp = {int(k): int(v) for k, v in data.get("user_xp", {}).items()}
+            loaded_dizzy = []
+            for item in data.get("dizzy_kontrollen", []):
+                if isinstance(item, dict):
+                    try:
+                        loaded_dizzy.append({"mod_id": int(item["mod_id"]), "target_id": int(item["target_id"]), "message_id": int(item.get("message_id", 0)), "timestamp": float(item.get("timestamp", 0))})
+                    except (KeyError, TypeError, ValueError):
+                        pass
+            legacy_dizzy = set()
+            for item in data.get("durchgefuehrte_kontrollen", []):
+                if isinstance(item, list) and len(item) >= 2:
+                    try: legacy_dizzy.add((int(item[0]), int(item[1])))
+                    except (TypeError, ValueError): pass
+            loaded_mod = {str(k).lower(): v for k, v in data.get("moderation_eintraege", {}).items()}
+            loaded_feedbacks = {str(k): v for k, v in data.get("team_feedbacks", {}).items()}
+            loaded_xp_locks = {}
+            for k, v in data.get("xp_locks", {}).items():
+                try: loaded_xp_locks[int(k)] = float(v)
+                except (TypeError, ValueError): pass
+            loaded_boost = data.get("active_xp_boost") if isinstance(data.get("active_xp_boost"), dict) else None
+            loaded_dizzy_messages = {}
+            for k, v in data.get("dizzy_last_message", {}).items():
+                if isinstance(v, dict):
+                    try: loaded_dizzy_messages[int(k)] = {"message_id": int(v.get("message_id", 0)), "timestamp": float(v.get("timestamp", 0))}
+                    except (TypeError, ValueError): pass
+            return loaded_xp, loaded_mod, data.get("active_ban_bolos", []), loaded_dizzy, legacy_dizzy, data.get("time_leaderboard", []), loaded_feedbacks, loaded_xp_locks, loaded_boost, loaded_dizzy_messages
         except Exception as e:
             print(f"Fehler beim Laden der Datenbank: {e}")
-    return {}, {}, [], set(), [], {}
+    return {}, {}, [], [], set(), [], {}, {}, None, {}
 
 def save_data():
-    dizzy_list = [[mod_id, target_id] for mod_id, target_id in durchgefuehrte_kontrollen]
-    
     data = {
         "user_xp": user_xp,
         "moderation_eintraege": moderation_eintraege,
         "active_ban_bolos": active_ban_bolos,
-        "durchgefuehrte_kontrollen": dizzy_list,
+        "dizzy_kontrollen": durchgefuehrte_kontrollen,
+        "durchgefuehrte_kontrollen": [[mod_id, target_id] for mod_id, target_id in legacy_dizzy_kontrollen],
+        "dizzy_last_message": {str(uid): info for uid, info in dizzy_last_message.items()},
         "time_leaderboard": time_leaderboard,
-        "team_feedbacks": team_feedbacks
+        "team_feedbacks": team_feedbacks,
+        "xp_locks": {str(uid): end for uid, end in xp_locks.items()},
+        "active_xp_boost": active_xp_boost
     }
+    temp_file=f"{DATA_FILE}.tmp"
     try:
-        with open(DATA_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=4)
+        with open(temp_file,"w",encoding="utf-8") as f:
+            json.dump(data,f,ensure_ascii=False,indent=4); f.flush(); os.fsync(f.fileno())
+        os.replace(temp_file,DATA_FILE)
     except Exception as e:
         print(f"Fehler beim Speichern der Datenbank: {e}")
+        try:
+            if os.path.exists(temp_file): os.remove(temp_file)
+        except OSError: pass
 
-user_xp, moderation_eintraege, active_ban_bolos, durchgefuehrte_kontrollen, time_leaderboard, team_feedbacks = load_data()
+(user_xp, moderation_eintraege, active_ban_bolos, durchgefuehrte_kontrollen, legacy_dizzy_kontrollen, time_leaderboard, team_feedbacks, xp_locks, active_xp_boost, dizzy_last_message) = load_data()
 
 text_cooldowns = {}
 fullmute_timers = {}
 fullmute_warned = set()
 voice_join_times = {}
 
-xp_locks = {}
-active_xp_boost = None
 leaderboard_message_id = None
+
+def get_last_dizzy_control(target_id: int):
+    records=[r for r in durchgefuehrte_kontrollen if r.get("target_id")==target_id]
+    return max(records,key=lambda r:r.get("timestamp",0)) if records else None
+
+def register_dizzy_message(message: discord.Message):
+    if message.guild and message.channel.id == DIZZY_KANAL_ID and not message.author.bot:
+        dizzy_last_message[message.author.id]={"message_id":message.id,"timestamp":message.created_at.timestamp()}
+        # Alte Kontrollen aus der vorherigen Datenbankversion werden durch
+        # die erste neue Nachricht der Zielperson wieder freigegeben.
+        for pair in list(legacy_dizzy_kontrollen):
+            if pair[1] == message.author.id:
+                legacy_dizzy_kontrollen.discard(pair)
+
+def cleanup_expired_xp_state():
+    global active_xp_boost
+    changed=False; now=time.time()
+    for uid,end in list(xp_locks.items()):
+        if now>=end: xp_locks.pop(uid,None); changed=True
+    if active_xp_boost and now>=active_xp_boost.get("end_timestamp",0):
+        active_xp_boost=None; changed=True
+    if changed: save_data()
 
 def is_team_member(member: discord.Member) -> bool:
     return any(r.id == TEAM_ROLLE_ID for r in member.roles)
@@ -1641,6 +1680,7 @@ async def check_expired_boosts():
             await boost_channel.send(embed=embed)
             await log_xp_general_action(boost_channel.guild, "XP Boost abgelaufen", "Der aktive XP-Boost ist regulär abgelaufen.")
         active_xp_boost = None
+        save_data()
 
 @tasks.loop(seconds=60)
 async def check_voice_xp():
@@ -1763,6 +1803,10 @@ async def on_message(message: discord.Message):
         await bot.process_commands(message)
         return
 
+    if message.channel.id == DIZZY_KANAL_ID:
+        register_dizzy_message(message)
+        save_data()
+
     if is_team_member(message.author):
         current_time = time.time()
         user_id = message.author.id
@@ -1876,6 +1920,7 @@ async def xp_lock(interaction: discord.Interaction, user: discord.Member, durati
         return
 
     xp_locks[user.id] = time.time() + seconds
+    save_data()
     await interaction.response.send_message(f"🔒 Die XP für {user.mention} wurden für **{readable}** gesperrt.", ephemeral=True)
 
     dm_embed = discord.Embed(
@@ -1899,6 +1944,7 @@ async def xp_unlock(interaction: discord.Interaction, user: discord.Member, grun
 
     if user.id in xp_locks:
         xp_locks.pop(user.id, None)
+        save_data()
         await interaction.response.send_message(f"🔓 Die XP-Sperre für {user.mention} wurde erfolgreich aufgehoben.", ephemeral=True)
         try:
             await user.send(embed=discord.Embed(title="🔓 Deine XP wurden entsperrt", description=f"Deine XP-Sperre wurde vorzeitig aufgehoben.\n\n**Grund:** {grund}", color=discord.Color.green()))
@@ -1929,6 +1975,7 @@ async def xp_boost(interaction: discord.Interaction, percentage: int, duration: 
         'percentage': percentage,
         'end_timestamp': time.time() + seconds
     }
+    save_data()
 
     await interaction.response.send_message(f"🚀 XP-Boost von **+{percentage}%** für **{readable}** aktiviert!", ephemeral=True)
 
@@ -1959,6 +2006,7 @@ async def boost_stop(interaction: discord.Interaction):
         return
 
     active_xp_boost = None
+    save_data()
     await interaction.response.send_message("✅ Der aktuelle XP Boost wurde erfolgreich gestoppt.", ephemeral=True)
 
     boost_channel = bot.get_channel(XP_BOOST_ANNOUNCEMENT_KANAL_ID)
@@ -2014,68 +2062,56 @@ async def xp_reset(interaction: discord.Interaction):
 @app_commands.describe(user="Wähle das Mitglied aus, das kontrolliert wurde")
 async def dizzykontrolle(interaction: discord.Interaction, user: discord.Member):
     if not is_team_member(interaction.user):
-        await interaction.response.send_message("❌ Keine Berechtigung!", ephemeral=True)
-        return
-
+        await interaction.response.send_message("❌ Keine Berechtigung!", ephemeral=True); return
     if interaction.channel_id != DIZZY_KANAL_ID:
-        await interaction.response.send_message(f"❌ Nur im Kanal <#{DIZZY_KANAL_ID}> erlaubt!", ephemeral=True)
-        return
+        await interaction.response.send_message(f"❌ Nur im Kanal <#{DIZZY_KANAL_ID}> erlaubt!", ephemeral=True); return
+    mod_id,target_id=interaction.user.id,user.id
+    if mod_id==target_id:
+        await interaction.response.send_message("❌ Du kannst dich nicht selbst dizzy kontrollieren!", ephemeral=True); return
 
-    mod_id = interaction.user.id
-    target_id = user.id
+    latest=dizzy_last_message.get(target_id)
+    try:
+        async for msg in interaction.channel.history(limit=DIZZY_HISTORY_LIMIT):
+            if msg.author.id==target_id and not msg.author.bot:
+                latest={"message_id":msg.id,"timestamp":msg.created_at.timestamp()}; break
+    except discord.Forbidden:
+        await interaction.response.send_message("❌ Ich kann den Nachrichtenverlauf nicht prüfen. Mir fehlt die Berechtigung zum Lesen des Verlaufs.", ephemeral=True); return
+    except discord.HTTPException:
+        pass
+    if latest is None:
+        await interaction.response.send_message(f"❌ {user.mention} hat noch keine Nachricht in diesem Kanal geschrieben. Die Person muss zuerst dort eine Nachricht schreiben.", ephemeral=True); return
 
-    if mod_id == target_id:
-        await interaction.response.send_message("❌ Du kannst dich nicht selbst dizzy kontrollieren!", ephemeral=True)
-        return
+    last=get_last_dizzy_control(target_id); now=time.time()
+    if last:
+        remaining=DIZZY_COOLDOWN_SECONDS-(now-last.get("timestamp",0))
+        if remaining>0:
+            minutes=int(remaining//60); seconds=int(remaining%60)
+            text=f"{minutes} Min. {seconds:02d} Sek." if minutes else f"{seconds} Sek."
+            await interaction.response.send_message(f"⏳ {user.mention} wurde gerade erst überprüft. Du kannst diese Person erst wieder in **{text}** kontrollieren.", ephemeral=True); return
+        if latest["message_id"] <= int(last.get("message_id",0)):
+            await interaction.response.send_message(f"❌ {user.mention} hat seit der letzten Dizzykontrolle keine neue Nachricht im Kanal geschrieben. Die Person muss zuerst erneut dort schreiben.", ephemeral=True); return
 
-    if (mod_id, target_id) in durchgefuehrte_kontrollen:
-        await interaction.response.send_message(f"❌ Du hast die Dizzykontrolle für {user.mention} bereits durchgeführt! Du erhältst keine XP mehr dafür.", ephemeral=True)
-        return
-
-    durchgefuehrte_kontrollen.add((mod_id, target_id))
+    durchgefuehrte_kontrollen.append({"mod_id":mod_id,"target_id":target_id,"message_id":int(latest["message_id"]),"timestamp":now})
     save_data()
-
-    received_xp = add_xp(mod_id, 15)
-    if received_xp > 0:
-        await log_xp_action(
-            interaction.guild,
-            interaction.user,
-            received_xp,
-            "Dizzykontrolle XP",
-            f"Erfolgreiche Durchführung einer Dizzykontrolle an {user.mention}"
-        )
+    received_xp=add_xp(mod_id,15)
+    if received_xp>0:
+        await log_xp_action(interaction.guild,interaction.user,received_xp,"Dizzykontrolle XP",f"Erfolgreiche Durchführung einer Dizzykontrolle an {user.mention}")
     await refresh_leaderboard_in_channel()
-
-    boost_info = ""
-    if active_xp_boost and time.time() < active_xp_boost['end_timestamp']:
-        boost_info = f" *(inkl. +{active_xp_boost['percentage']}% Boost)*"
-
-    embed = discord.Embed(
-        title="Dizzykontrolle durchgeführt ✅",
-        description=f"**Teammitglied:** {interaction.user.mention}\n**Kontrollierte Person:** {user.mention}\n\n🎁 **Belohnung:** `+{received_xp} XP`{boost_info}",
-        color=discord.Color.green()
-    )
-    
+    boost_info=""
+    if active_xp_boost and time.time()<active_xp_boost.get("end_timestamp",0): boost_info=f" *(inkl. +{active_xp_boost['percentage']}% Boost)*"
+    embed=discord.Embed(title="Dizzykontrolle durchgeführt ✅",description=f"**Teammitglied:** {interaction.user.mention}\n**Kontrollierte Person:** {user.mention}\n\n🎁 **Belohnung:** `+{received_xp} XP`{boost_info}\n⏱️ **Erneute Kontrolle:** nach 5 Minuten und einer neuen Nachricht der Person",color=discord.Color.green())
     await interaction.response.send_message(embed=embed)
     try:
-        original_msg = await interaction.original_response()
-        await original_msg.delete(delay=60)
-    except Exception:
-        pass
-
-    dizzy_log_kanal = interaction.guild.get_channel(DIZZY_LOG_KANAL_ID)
-    if dizzy_log_kanal:
-        log_embed = discord.Embed(
-            title="🔍 Dizzykontrolle Log",
-            description="Eine neue Dizzykontrolle wurde registriert.",
-            color=discord.Color.blue()
-        )
-        log_embed.add_field(name="🛡️ Teammitglied", value=interaction.user.mention, inline=True)
-        log_embed.add_field(name="👤 Kontrollierte Person", value=user.mention, inline=True)
-        log_embed.add_field(name="✨ Vergebene XP", value=f"`+{received_xp} XP`{boost_info}", inline=False)
-        log_embed.set_footer(text="Sirius RP • Dizzykontroll-System")
-
-        await dizzy_log_kanal.send(embed=log_embed)
+        original_msg=await interaction.original_response(); await original_msg.delete(delay=60)
+    except Exception: pass
+    kanal=interaction.guild.get_channel(DIZZY_LOG_KANAL_ID)
+    if kanal:
+        log=discord.Embed(title="🔍 Dizzykontrolle Log",description="Eine neue Dizzykontrolle wurde registriert.",color=discord.Color.blue())
+        log.add_field(name="🛡️ Teammitglied",value=interaction.user.mention,inline=True)
+        log.add_field(name="👤 Kontrollierte Person",value=user.mention,inline=True)
+        log.add_field(name="💬 Verwendete Nachricht",value=f"`{latest['message_id']}`",inline=True)
+        log.add_field(name="✨ Vergebene XP",value=f"`+{received_xp} XP`{boost_info}",inline=False)
+        log.set_footer(text="Sirius RP • Dizzykontroll-System"); await kanal.send(embed=log)
 
 @bot.command(name="setupbewerbung")
 @commands.has_permissions(administrator=True)
