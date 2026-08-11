@@ -102,6 +102,7 @@ DIZZY_LOG_KANAL_ID = 1532348593573199872
 XP_LOG_KANAL_ID = 1532348632412721312
 BAN_BOLO_LOG_KANAL_ID = 1532348686385025205
 CALL_ADMIN_LOG_KANAL_ID = 1532348723705811016
+FEEDBACK_REMOVE_LOG_KANAL_ID = 1536669127891226624
 
 # Verify System IDs
 VERIFY_KANAL_ID = 1527404574430855340
@@ -146,10 +147,13 @@ def load_data():
                 raw_mod = data.get("moderation_eintraege", {})
                 loaded_mod = {k.lower(): v for k, v in raw_mod.items()}
 
-                return loaded_xp, loaded_mod, data.get("active_ban_bolos", []), loaded_dizzy, data.get("time_leaderboard", [])
+                raw_feedbacks = data.get("team_feedbacks", {})
+                loaded_feedbacks = {int(k): v for k, v in raw_feedbacks.items()}
+
+                return loaded_xp, loaded_mod, data.get("active_ban_bolos", []), loaded_dizzy, data.get("time_leaderboard", []), loaded_feedbacks
         except Exception as e:
             print(f"Fehler beim Laden der Datenbank: {e}")
-    return {}, {}, [], set(), []
+    return {}, {}, [], set(), [], {}
 
 def save_data():
     dizzy_list = [[mod_id, target_id] for mod_id, target_id in durchgefuehrte_kontrollen]
@@ -159,7 +163,8 @@ def save_data():
         "moderation_eintraege": moderation_eintraege,
         "active_ban_bolos": active_ban_bolos,
         "durchgefuehrte_kontrollen": dizzy_list,
-        "time_leaderboard": time_leaderboard
+        "time_leaderboard": time_leaderboard,
+        "team_feedbacks": team_feedbacks
     }
     try:
         with open(DATA_FILE, "w", encoding="utf-8") as f:
@@ -167,7 +172,7 @@ def save_data():
     except Exception as e:
         print(f"Fehler beim Speichern der Datenbank: {e}")
 
-user_xp, moderation_eintraege, active_ban_bolos, durchgefuehrte_kontrollen, time_leaderboard = load_data()
+user_xp, moderation_eintraege, active_ban_bolos, durchgefuehrte_kontrollen, time_leaderboard, team_feedbacks = load_data()
 
 text_cooldowns = {}
 fullmute_timers = {}
@@ -243,7 +248,6 @@ async def log_xp_action(guild: discord.Guild, user: discord.Member, amount: int,
 
 
 async def log_xp_general_action(guild: discord.Guild, action_title: str, description: str):
-    """Loggt allgemeine XP-Befehle (Locks, Boosts, Stops) in den XP-Log Kanal."""
     kanal = guild.get_channel(XP_LOG_KANAL_ID)
     if not kanal:
         return
@@ -295,7 +299,7 @@ def build_leaderboard_embed(guild: discord.Guild) -> discord.Embed:
             " 📞 **+10 XP** für übernommenen Call Admin Fall\n"
             " 🚨 **+15 XP** für erfolgreiche Dizzy-Kontrolle\n\n"
             "━━━━━━━\n\n"
-            " ⚠️ **XP-Ausnutzung (z. B. Spam, AFK-Farmen, Self-Feedback)** wird erkannt und **führt zu Sanktionen** — Verwarnung, Kick oder Bann nach Ermessen des Teams."
+            " ⚠️ **XP-Ausnutzung (z. B. Spam, AFK-Farmen, Self-Feedback)** wird erkannt und **führt zu Sanktionen** — Verwarnung, Kick oder Bann nach Ermessen du Teams."
         ),
         color=discord.Color.blue()
     )
@@ -336,47 +340,26 @@ def get_roblox_avatar_url(username: str) -> str:
 
 
 # ==========================================
-# COMMAND: FEEDBACK STATS
+# COMMAND: FEEDBACK STATS & REMOVE
 # ==========================================
 @bot.tree.command(name="feedback-stats", description="Zeige die Feedback-Statistiken für ein Teammitglied an.")
 @app_commands.describe(user="Das Teammitglied")
 async def feedback_stats(interaction: discord.Interaction, user: discord.Member):
-    # Nur Leute mit der Rolle 1527349817875890356 können den Befehl ausführen
     if not has_role(interaction.user, XP_BOOST_LOCK_ROLLE_ID):
         await interaction.response.send_message("❌ Du hast keine Berechtigung, diesen Befehl auszuführen.", ephemeral=True)
         return
 
-    # Nur Feedback Stats von Leuten mit dieser Rolle 1527349817708122189 anzeigen
     if not has_role(user, TEAM_ROLLE_ID):
         await interaction.response.send_message("❌ Diese Person hat keine Feedback-Statistiken (kein Teammitglied).", ephemeral=True)
         return
 
-    log_kanal = interaction.guild.get_channel(LOG_KANAL_ID)
-    if not log_kanal:
-        await interaction.response.send_message("❌ Log-Kanal nicht gefunden.", ephemeral=True)
-        return
-
-    total_score = 0
-    count = 0
-    
-    # Durchsuchen der Logs nach Feedbacks für den Benutzer
-    async for message in log_kanal.history(limit=500):
-        if message.author == bot.user and message.embeds:
-            embed = message.embeds[0]
-            if embed.title == "🌟 Neues Feedback":
-                # Prüfen, ob der User im Feld "An:" erwähnt wird
-                for field in embed.fields:
-                    if field.name == "**An:**" and str(user.id) in field.value:
-                        # Sterne zählen
-                        sterne_field = next((f for f in embed.fields if f.name == "**Bewertung:**"), None)
-                        if sterne_field:
-                            sterne = sterne_field.value.count("⭐")
-                            total_score += sterne
-                            count += 1
+    feedbacks = team_feedbacks.get(str(user.id), [])
+    count = len(feedbacks)
 
     if count == 0:
         await interaction.response.send_message(f"ℹ️ {user.display_name} hat bisher kein Feedback erhalten.", ephemeral=True)
     else:
+        total_score = sum(f["sterne"] for f in feedbacks)
         avg = total_score / count
         embed = discord.Embed(
             title=f"📊 Feedback-Statistik: {user.display_name}",
@@ -388,6 +371,131 @@ async def feedback_stats(interaction: discord.Interaction, user: discord.Member)
         embed.set_footer(text="Sirius RP • Feedback-System")
         
         await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    # Logging für feedback-stats
+    log_kanal = interaction.guild.get_channel(FEEDBACK_REMOVE_LOG_KANAL_ID)
+    if log_kanal:
+        log_embed = discord.Embed(
+            title="📊 Feedback-Stats aufgerufen",
+            description=f"Von {interaction.user.mention} für {user.mention}.",
+            color=discord.Color.blue()
+        )
+        log_embed.set_footer(text="Sirius RP • Logging")
+        await log_kanal.send(embed=log_embed)
+
+
+class FeedbackRemoveReasonModal(ui.Modal, title="Grund für Feedback-Entfernung"):
+    grund = ui.TextInput(
+        label="Grund",
+        style=discord.TextStyle.paragraph,
+        placeholder="Warum wird dieses Feedback entfernt?",
+        required=True,
+        max_length=500
+    )
+
+    def __init__(self, target_user: discord.Member, feedback_index: int):
+        super().__init__()
+        self.target_user = target_user
+        self.feedback_index = feedback_index
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        
+        user_id_str = str(self.target_user.id)
+        if user_id_str not in team_feedbacks or len(team_feedbacks[user_id_str]) <= self.feedback_index:
+            await interaction.followup.send("❌ Das ausgewählte Feedback existiert nicht mehr.", ephemeral=True)
+            return
+
+        removed_fb = team_feedbacks[user_id_str].pop(self.feedback_index)
+        if not team_feedbacks[user_id_str]:
+            team_feedbacks.pop(user_id_str, None)
+        save_data()
+
+        # XP Abzug anpassen falls vergeben
+        xp_map = {3: 3, 4: 10, 5: 15}
+        xp_zu_entfernen = xp_map.get(removed_fb["sterne"], 0)
+        if xp_zu_entfernen > 0:
+            current_xp = user_xp.get(self.target_user.id, 0)
+            user_xp[self.target_user.id] = max(0, current_xp - xp_zu_entfernen)
+            save_data()
+            await refresh_leaderboard_in_channel()
+
+        # Embed Nachricht für den Log-Kanal 1536669127891226624
+        log_kanal = interaction.guild.get_channel(FEEDBACK_REMOVE_LOG_KANAL_ID)
+        if log_kanal:
+            log_embed = discord.Embed(
+                title="🗑️ Feedback entfernt",
+                description=f"Ein Feedback für {self.target_user.mention} wurde gelöscht.",
+                color=discord.Color.red()
+            )
+            log_embed.add_field(name="🛡️ Moderator", value=interaction.user.mention, inline=True)
+            log_embed.add_field(name="👤 Teammitglied", value=self.target_user.mention, inline=True)
+            log_embed.add_field(name="⭐ Sterne", value="⭐" * removed_fb["sterne"], inline=True)
+            log_embed.add_field(name="💬 Ursprünglicher Kommentar", value=removed_fb["kommentar"], inline=False)
+            log_embed.add_field(name="📝 Grund der Entfernung", value=self.grund.value, inline=False)
+            log_embed.set_footer(text="Sirius RP • Feedback-Remove System")
+            await log_kanal.send(embed=log_embed)
+
+        await interaction.followup.send("✅ Das Feedback wurde erfolgreich entfernt und die Stats/XP wurden aktualisiert.", ephemeral=True)
+
+
+class FeedbackRemoveSelect(ui.Select):
+    def __init__(self, target_user: discord.Member, feedbacks: list):
+        self.target_user = target_user
+        options = []
+        # Feedbacks von neu nach alt (da sie in der Liste umgekehrt oder mit Index angezeigt werden)
+        for idx, fb in enumerate(feedbacks):
+            stars_str = "⭐" * fb["sterne"]
+            label = f"#{idx+1} | {stars_str} | Von: {fb['autor_name']}"
+            desc = fb["kommentar"][:75] if len(fb["kommentar"]) > 75 else fb["kommentar"]
+            options.append(discord.SelectOption(label=label[:100], value=str(idx), description=desc[:100]))
+            
+        super().__init__(placeholder="Wähle das zu entfernende Feedback aus...", min_values=1, max_values=1, options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        selected_idx = int(self.values[0])
+        modal = FeedbackRemoveReasonModal(self.target_user, selected_idx)
+        await interaction.response.send_modal(modal)
+
+
+class FeedbackRemoveView(ui.View):
+    def __init__(self, target_user: discord.Member, feedbacks: list):
+        super().__init__(timeout=120)
+        self.add_item(FeedbackRemoveSelect(target_user, feedbacks))
+
+
+@bot.tree.command(name="feedback-remove", description="Entferne ein Feedback eines Teammitglieds.")
+@app_commands.describe(user="Das Teammitglied")
+async def feedback_remove(interaction: discord.Interaction, user: discord.Member):
+    # Berechtigte Rolle: 1527349818031214718
+    if not has_role(interaction.user, 1527349818031214718) and not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("❌ Du hast keine Berechtigung, diesen Befehl auszuführen.", ephemeral=True)
+        return
+
+    # Wer Feedback entfernen kann: Nur bei Leuten mit Rolle 1527349817708122189
+    if not has_role(user, 1527349817708122189):
+        await interaction.response.send_message("❌ Dieses Mitglied hat keine Teamrolle und somit keine Feedbacks.", ephemeral=True)
+        return
+
+    feedbacks = team_feedbacks.get(str(user.id), [])
+    if not feedbacks:
+        await interaction.response.send_message(f"ℹ️ Für {user.display_name} sind keine Feedbacks im System hinterlegt.", ephemeral=True)
+        return
+
+    # Von neu nach alt sortieren (neueste am Anfang)
+    sorted_feedbacks = sorted(feedbacks, key=lambda x: x["timestamp"], reverse=True)
+
+    view = FeedbackRemoveView(user, sorted_feedbacks)
+    
+    embed = discord.Embed(
+        title=f"🗑️ Feedback entfernen: {user.display_name}",
+        description="Wähle im Dropdown-Menü unten das Feedback aus, welches du entfernen möchtest. (Neu nach Alt sortiert)",
+        color=discord.Color.red()
+    )
+    for idx, fb in enumerate(sorted_feedbacks[:5]): # Zeige Vorschau dersten 5
+        embed.add_field(name=f"#{idx+1} — {'⭐'*fb['sterne']}", value=f"**Kommentar:** {fb['kommentar']}\n*Datum:* <t:{int(fb['timestamp'])}:R>", inline=False)
+        
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
 
 # ==========================================
@@ -1076,6 +1184,21 @@ class FeedbackModal(ui.Modal, title="Dein Feedback"):
         xp_map = {1: 0, 2: 0, 3: 3, 4: 10, 5: 15}
         xp_erhalten = xp_map.get(self.sterne, 0)
         sterne_emojis = "⭐" * self.sterne
+
+        # Feedback in dict abspeichern (Persistenz)
+        target_id_str = str(self.target_member.id)
+        if target_id_str not in team_feedbacks:
+            team_feedbacks[target_id_str] = []
+        
+        feedback_entry = {
+            "autor_id": interaction.user.id,
+            "autor_name": interaction.user.display_name,
+            "sterne": self.sterne,
+            "kommentar": self.grund_input.value,
+            "timestamp": time.time()
+        }
+        team_feedbacks[target_id_str].append(feedback_entry)
+        save_data()
 
         if is_team_member(self.target_member):
             added = add_xp(self.target_member.id, xp_erhalten)
