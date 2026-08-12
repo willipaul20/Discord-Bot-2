@@ -200,8 +200,6 @@ def waffenschein_get_application_from_embed(message: discord.Message):
                 return application
 
     # 3. Fallback: alle sichtbaren Embed-Texte nach einer bekannten ID
-    #    durchsuchen. Das macht die Buttons robust gegen kleine
-    #    Änderungen an der Embed-Darstellung.
     visible_text = " ".join([
         description,
         str(embed.title or ""),
@@ -212,14 +210,39 @@ def waffenschein_get_application_from_embed(message: discord.Message):
     ])
 
     for application_id, application in waffenschein_bewerbungen.items():
-        if application_id in visible_text:
+        if str(application_id) in visible_text:
             return application
+
+    # 4. WICHTIGER Fallback für bereits vorhandene Bewerbungen:
+    # Ältere Bewerbungsnachrichten können noch keine Bewerbungs-ID
+    # enthalten. Deshalb lesen wir den Bewerber direkt aus dem Embed
+    # und suchen seine offene Bewerbung in der JSON-Datenbank.
+    user_match = re.search(
+        r"Bewerber\s*:\s*<@!?([0-9]+)>",
+        visible_text,
+        re.IGNORECASE
+    )
+
+    if user_match:
+        user_id = int(user_match.group(1))
+        candidates = [
+            app for app in waffenschein_bewerbungen.values()
+            if int(app.get("user_id", 0)) == user_id
+        ]
+
+        # Bevorzugt eine noch offene/pending Bewerbung.
+        for app in candidates:
+            if app.get("status") == "pending":
+                return app
+
+        if candidates:
+            return candidates[-1]
 
     return None
 
 
 def waffenschein_user_has_license_role(member):
-    """Prüft, ob der Benutzer bereits einen kleinen oder großen Waffenschein besitzt."""
+    """Prüft, ob der Benutzer bereits irgendeinen Waffenschein besitzt."""
     if member is None:
         return False
 
@@ -230,6 +253,132 @@ def waffenschein_user_has_license_role(member):
         }
         for role in member.roles
     )
+
+
+def waffenschein_user_has_specific_license(member, license_key: str):
+    """
+    Prüft nur, ob der Benutzer genau den Waffenschein besitzt,
+    für den er sich gerade bewerben möchte.
+
+    Wichtig:
+    - Kleiner vorhanden -> Großer darf beantragt werden.
+    - Großer vorhanden -> Kleiner darf beantragt werden.
+    - Derselbe Waffenschein vorhanden -> darf NICHT erneut beantragt werden.
+    """
+    if member is None:
+        return False
+
+    wanted_role_id = (
+        GROSSER_WAFFENSCHEIN_ROLLE_ID
+        if license_key == "gross"
+        else KLEINER_WAFFENSCHEIN_ROLLE_ID
+    )
+
+    return any(role.id == wanted_role_id for role in member.roles)
+
+
+def waffenschein_extract_user_id_from_message(message: discord.Message):
+    """Liest eine Bewerber-ID aus Embed/Content einer Bewerbungsnachricht."""
+    texts = [message.content or ""]
+
+    for embed in message.embeds:
+        texts.append(embed.title or "")
+        texts.append(embed.description or "")
+        for field in embed.fields:
+            texts.append(str(field.name))
+            texts.append(str(field.value))
+
+    visible_text = "\n".join(texts)
+
+    # Discord-Mention: <@123> oder <@!123>
+    match = re.search(r"<@!?([0-9]{15,25})>", visible_text)
+    if match:
+        return int(match.group(1))
+
+    # Fallback für ältere/angepasste Embeds: Bewerber: 123
+    match = re.search(
+        r"(?:Bewerber|Benutzer|User)\s*:?\s*`?([0-9]{15,25})`?",
+        visible_text,
+        re.IGNORECASE
+    )
+    if match:
+        return int(match.group(1))
+
+    return None
+
+
+def waffenschein_extract_license_key_from_message(message: discord.Message):
+    """Erkennt Groß/Klein aus einer Bewerbungsnachricht."""
+    texts = [message.content or ""]
+
+    for embed in message.embeds:
+        texts.append(embed.title or "")
+        texts.append(embed.description or "")
+        for field in embed.fields:
+            texts.append(str(field.name))
+            texts.append(str(field.value))
+
+    text = "\n".join(texts).lower()
+
+    if "großer waffenschein" in text:
+        return "gross"
+    if "kleiner waffenschein" in text:
+        return "klein"
+
+    return None
+
+
+def waffenschein_make_fallback_application(
+    user_id: int,
+    license_key: str,
+    application_id: str
+):
+    """Erzeugt eine minimale Bewerbung für alte Daten ohne JSON-Eintrag."""
+    return {
+        "id": application_id,
+        "user_id": int(user_id),
+        "username": f"User {user_id}",
+        "license_key": license_key,
+        "lizenz": (
+            "Großer Waffenschein"
+            if license_key == "gross"
+            else "Kleiner Waffenschein"
+        ),
+        "fragen": [],
+        "antworten": [],
+        "question_index": 0,
+        "status": "pending",
+        "started_at": time.time(),
+        "completed_at": time.time(),
+        "ticket_channel_id": None,
+    }
+
+
+async def waffenschein_find_existing_ticket(
+    guild: discord.Guild,
+    user_id: int,
+    license_key: str
+):
+    """Findet ein bereits vorhandenes Waffenschein-Ticket für einen Benutzer."""
+    prefix = (
+        "waffenschein-gross-"
+        if license_key == "gross"
+        else "waffenschein-klein-"
+    )
+
+    for channel in guild.text_channels:
+        topic = getattr(channel, "topic", "") or ""
+
+        if (
+            channel.name.startswith(prefix)
+            or (
+                "Waffenschein-Bewerbung" in topic
+                and re.search(rf"User\s+{user_id}(?:\D|$)", topic)
+            )
+        ):
+            return channel
+
+    return None
 
 
 def waffenschein_user_has_active_application(user_id: int):
@@ -374,11 +523,21 @@ async def waffenschein_finish_application(user: discord.User, application: dict)
 
     embed.set_footer(text="Sirius RP • Waffenschein-Behörde")
 
-    await channel.send(
+    message = await channel.send(
         content=f"<@&{WAFFENSCHEIN_BEARBEITUNG_ROLLE_ID}>",
         embed=embed,
-        view=WaffenscheinApplicationView()
+        view=WaffenscheinApplicationView(),
+        allowed_mentions=discord.AllowedMentions(
+            roles=True,
+            users=False,
+            everyone=False
+        )
     )
+
+    # Nachricht dauerhaft mit der Bewerbung verknüpfen.
+    application["application_message_id"] = message.id
+    application["application_channel_id"] = channel.id
+    save_waffenschein_data()
 
     return True
 
@@ -411,13 +570,22 @@ class WaffenscheinSelect(ui.Select):
     async def callback(self, interaction: discord.Interaction):
         license_key = self.values[0]
 
-        # Wer bereits einen kleinen oder großen Waffenschein besitzt,
-        # darf keine weitere Bewerbung starten.
-        if waffenschein_user_has_license_role(interaction.user):
+        # Nur derselbe Waffenschein darf nicht erneut beantragt werden.
+        # Der jeweils andere Waffenschein darf trotz vorhandener Lizenz
+        # beantragt werden.
+        if waffenschein_user_has_specific_license(
+            interaction.user,
+            license_key
+        ):
+            vorhandener = (
+                "Großen Waffenschein"
+                if license_key == "gross"
+                else "Kleinen Waffenschein"
+            )
             await interaction.response.send_message(
-                "❌ Du besitzt bereits einen Waffenschein. "
-                "Solange du den Kleinen oder Großen Waffenschein besitzt, "
-                "kannst du keine neue Bewerbung starten.",
+                f"❌ Du besitzt bereits den **{vorhandener}**. "
+                "Diesen kannst du nicht erneut beantragen. "
+                "Den jeweils anderen Waffenschein kannst du weiterhin beantragen.",
                 ephemeral=True
             )
             return
@@ -468,11 +636,20 @@ class WaffenscheinStartView(ui.View):
         interaction: discord.Interaction,
         button: ui.Button
     ):
-        # Erneute Prüfung direkt vor dem Start.
-        if waffenschein_user_has_license_role(interaction.user):
+        # Erneute Prüfung direkt vor dem Start:
+        # Nur derselbe Waffenschein blockiert die Bewerbung.
+        if waffenschein_user_has_specific_license(
+            interaction.user,
+            self.license_key
+        ):
+            vorhandener = (
+                "Großen Waffenschein"
+                if self.license_key == "gross"
+                else "Kleinen Waffenschein"
+            )
             await interaction.response.send_message(
-                "❌ Du besitzt bereits einen Waffenschein. "
-                "Eine neue Bewerbung ist deshalb nicht möglich.",
+                f"❌ Du besitzt bereits den **{vorhandener}**. "
+                "Diesen kannst du nicht erneut beantragen.",
                 ephemeral=True
             )
             return
@@ -577,9 +754,59 @@ class WaffenscheinApplicationView(ui.View):
             )
             return
 
-        application = waffenschein_get_application_from_embed(
-            interaction.message
-        )
+        application = None
+
+        # Exakte Zuordnung über die ID der Bewerbungsnachricht.
+        for stored_application in waffenschein_bewerbungen.values():
+            if int(stored_application.get("application_message_id") or 0) == int(interaction.message.id):
+                application = stored_application
+                break
+
+        if not application:
+            application = waffenschein_get_application_from_embed(
+                interaction.message
+            )
+
+        # Falls die JSON-Daten nach einem Neustart/Dateiwechsel nicht mehr
+        # mit der alten Bewerbungsnachricht übereinstimmen, versuchen wir die
+        # Bewerbung direkt aus dem Embed wiederherzustellen.
+        if not application:
+            recovered_user_id = waffenschein_extract_user_id_from_message(
+                interaction.message
+            )
+            recovered_license_key = waffenschein_extract_license_key_from_message(
+                interaction.message
+            )
+
+            if recovered_user_id and recovered_license_key:
+                existing_ticket = await waffenschein_find_existing_ticket(
+                    interaction.guild,
+                    recovered_user_id,
+                    recovered_license_key
+                )
+
+                if existing_ticket:
+                    ticket_link = (
+                        f"https://discord.com/channels/"
+                        f"{interaction.guild.id}/{existing_ticket.id}"
+                    )
+                    await interaction.response.send_message(
+                        "ℹ️ **Das Ticket wurde bereits eröffnet.**\n"
+                        f"🎫 [Zum Ticket](<{ticket_link}>)",
+                        ephemeral=True
+                    )
+                    return
+
+                recovered_id = f"legacy-{interaction.message.id}"
+                application = waffenschein_make_fallback_application(
+                    recovered_user_id,
+                    recovered_license_key,
+                    recovered_id
+                )
+
+                # Für die weitere Bearbeitung dauerhaft speichern.
+                waffenschein_bewerbungen[recovered_id] = application
+                save_waffenschein_data()
 
         if not application:
             await interaction.response.send_message(
@@ -615,11 +842,26 @@ class WaffenscheinApplicationView(ui.View):
             return
 
         if application.get("ticket_channel_id"):
-            await interaction.response.send_message(
-                "❌ Für diese Bewerbung wurde bereits ein Ticket geöffnet.",
-                ephemeral=True
+            existing_ticket = guild.get_channel(
+                int(application["ticket_channel_id"])
             )
-            return
+
+            if existing_ticket:
+                ticket_link = (
+                    f"https://discord.com/channels/"
+                    f"{guild.id}/{existing_ticket.id}"
+                )
+                await interaction.response.send_message(
+                    "ℹ️ **Das Ticket wurde bereits eröffnet.**\n"
+                    f"🎫 [Zum Ticket](<{ticket_link}>)",
+                    ephemeral=True
+                )
+                return
+
+            # Ticket ist in den Daten eingetragen, existiert aber nicht mehr.
+            application["ticket_channel_id"] = None
+            application["status"] = "pending"
+            save_waffenschein_data()
 
         if application.get("status") != "pending":
             await interaction.response.send_message(
@@ -727,15 +969,26 @@ class WaffenscheinApplicationView(ui.View):
             # ------------------------------------------------------
             # Waffenschein-Ticket: erste und zweite Nachricht
             # ------------------------------------------------------
-            # 1. Nachricht: Annahme / Zahlungsaufforderung
+            # WICHTIG:
+            # Die Behördenrolle wird NICHT gepingt.
+            # Nur der Bewerber wird als echte Discord-Mention gesendet.
             applicant_mention = (
                 applicant.mention
                 if applicant
                 else f"<@{application['user_id']}>"
             )
 
+            applicant_name = (
+                applicant.display_name
+                if applicant
+                else application.get("username", "Bewerber")
+            )
+
+            # Mentions funktionieren zuverlässig im normalen Nachrichtentext.
+            # Im Embed-Titel darf keine <@ID>-Mention stehen, da Discord sie
+            # dort nicht als echten Ping verarbeitet.
             annahme_embed = discord.Embed(
-                title=f"🛡️ Waffenschein beantragt von {applicant_mention} angenommen.",
+                title=f"🛡️ Waffenschein beantragt von {applicant_name} angenommen.",
                 description=(
                     "Bitte bezahle jetzt nurnoch den Waffenschein ab und dann "
                     "hast du schon deinen Waffenschein!"
@@ -743,18 +996,13 @@ class WaffenscheinApplicationView(ui.View):
                 color=discord.Color.blue()
             )
 
-            # Bewerber und Behördenrolle werden hier bewusst explizit gepingt.
-            # allowed_mentions stellt sicher, dass Discord die Mentions tatsächlich verarbeitet.
             await ticket.send(
-                content=(
-                    f"<@{application['user_id']}> "
-                    f"<@&{WAFFENSCHEIN_BEARBEITUNG_ROLLE_ID}>"
-                ),
+                content=applicant_mention,
                 embed=annahme_embed,
                 view=WaffenscheinPaidView(),
                 allowed_mentions=discord.AllowedMentions(
                     users=True,
-                    roles=True,
+                    roles=False,
                     everyone=False,
                     replied_user=False
                 )
@@ -791,8 +1039,8 @@ class WaffenscheinApplicationView(ui.View):
             # verlinkt wird.
             ticket_link = f"https://discord.com/channels/{guild.id}/{ticket.id}"
             await interaction.response.send_message(
-                f"✅ Das Ticket wurde erfolgreich geöffnet.\n"
-                f"🎫 **Zum Ticket:** {ticket_link}"
+                f"✅ **Das Ticket wurde erfolgreich eröffnet!**\n"
+                f"🎫 [Zum Ticket](<{ticket_link}>)"
             )
 
             await waffenschein_log(
@@ -852,9 +1100,18 @@ class WaffenscheinApplicationView(ui.View):
             )
             return
 
-        application = waffenschein_get_application_from_embed(
-            interaction.message
-        )
+        application = None
+
+        # Exakte Zuordnung über die ID der Bewerbungsnachricht.
+        for stored_application in waffenschein_bewerbungen.values():
+            if int(stored_application.get("application_message_id") or 0) == int(interaction.message.id):
+                application = stored_application
+                break
+
+        if not application:
+            application = waffenschein_get_application_from_embed(
+                interaction.message
+            )
 
         if not application:
             await interaction.response.send_message(
@@ -971,18 +1228,104 @@ class WaffenscheinPaidView(ui.View):
                     application = stored_application
                     break
 
-        # Letzter Fallback: Bewerbungs-ID aus dem Kanalnamen bzw. Topic.
+        # Letzter Fallback: Bewerbungs-ID oder Benutzer-ID aus dem
+        # Ticketnamen. Damit funktionieren auch ältere Tickets.
         if not application:
             channel_name = getattr(interaction.channel, "name", "") or ""
-            for application_id, stored_application in waffenschein_bewerbungen.items():
-                if str(application_id) in channel_name:
-                    application = stored_application
-                    break
+
+            # Neue Tickets heißen z.B.:
+            # waffenschein-gross-123456
+            # waffenschein-klein-123456
+            suffix_match = re.search(
+                r"waffenschein-(?:gross|klein)-([0-9]+)$",
+                channel_name,
+                re.IGNORECASE
+            )
+
+            if suffix_match:
+                suffix = suffix_match.group(1)
+
+                candidates = [
+                    stored_application
+                    for stored_application in waffenschein_bewerbungen.values()
+                    if str(stored_application.get("user_id", "")).endswith(suffix)
+                ]
+
+                # Ein Ticket mit bereits gesetzter ticket_channel_id
+                # hat immer Vorrang.
+                for stored_application in candidates:
+                    if int(stored_application.get("ticket_channel_id") or 0) == int(interaction.channel.id):
+                        application = stored_application
+                        break
+
+                if not application and candidates:
+                    application = candidates[-1]
+
+            # Zusätzlich nach der Bewerbungs-ID suchen.
+            if not application:
+                for application_id, stored_application in waffenschein_bewerbungen.items():
+                    if str(application_id) in channel_name:
+                        application = stored_application
+                        break
+
+        if not application:
+            # Als weiterer Fallback: User-ID aus dem Ticket-Topic.
+            user_match = re.search(
+                r"User\s+([0-9]+)",
+                topic,
+                re.IGNORECASE
+            )
+
+            ticket_user_id = (
+                int(user_match.group(1))
+                if user_match
+                else None
+            )
+
+            if ticket_user_id:
+                candidates = [
+                    stored_application
+                    for stored_application in waffenschein_bewerbungen.values()
+                    if int(stored_application.get("user_id", 0)) == ticket_user_id
+                ]
+                if candidates:
+                    # Bereits mit diesem Ticket verknüpfte Bewerbung bevorzugen.
+                    for candidate in candidates:
+                        if int(candidate.get("ticket_channel_id") or 0) == int(interaction.channel.id):
+                            application = candidate
+                            break
+
+                    if not application:
+                        application = candidates[-1]
+
+            # Letzter Fallback für Tickets, deren JSON-Eintrag fehlt:
+            # license_key direkt aus dem Kanalnamen lesen.
+            if not application and ticket_user_id:
+                channel_name = (
+                    getattr(interaction.channel, "name", "") or ""
+                ).lower()
+
+                if channel_name.startswith("waffenschein-gross-"):
+                    license_key = "gross"
+                elif channel_name.startswith("waffenschein-klein-"):
+                    license_key = "klein"
+                else:
+                    license_key = None
+
+                if license_key:
+                    recovered_id = f"legacy-ticket-{interaction.channel.id}"
+                    application = waffenschein_make_fallback_application(
+                        ticket_user_id,
+                        license_key,
+                        recovered_id
+                    )
+                    application["ticket_channel_id"] = interaction.channel.id
+                    waffenschein_bewerbungen[recovered_id] = application
+                    save_waffenschein_data()
 
         if not application:
             await interaction.response.send_message(
-                "❌ Die Bewerbung konnte nicht automatisch über das Ticket zugeordnet werden. "
-                "Bitte prüfe, ob das Ticket mit der aktuellen Bot-Version erstellt wurde.",
+                "❌ Der Bewerber dieses Tickets konnte nicht ermittelt werden.",
                 ephemeral=True
             )
             return
@@ -1089,18 +1432,16 @@ class WaffenscheinPaidView(ui.View):
         )
 
         try:
+            # Bewusst schlicht gehalten: genau die gewünschte Meldung,
+            # bevor der Channel gelöscht wird.
             await interaction.response.send_message(
-                f"✅ Zahlung bestätigt. {applicant.mention} hat "
-                f"{role.mention} erhalten.\n"
-                "🗑️ Das Ticket wird jetzt geschlossen.",
-                ephemeral=True
+                "🗑️ **Das Ticket wird jetzt geschlossen.**"
             )
         except Exception:
             pass
 
-        # Kurze Verzögerung, damit die Bestätigung noch verarbeitet
-        # werden kann, danach wird der komplette Ticket-Channel gelöscht.
-        await asyncio.sleep(1)
+        # Kurze Verzögerung, damit die Nachricht noch sichtbar wird.
+        await asyncio.sleep(2)
 
         try:
             await ticket_channel.delete(
