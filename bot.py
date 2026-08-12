@@ -186,6 +186,8 @@ def waffenschein_get_application_from_embed(message: discord.Message):
         if match:
             application = waffenschein_bewerbungen.get(match.group(1))
             if application:
+                waffenschein_repair_stale_paid_status(application)
+            if application:
                 return application
 
         # Falls nur der Feldwert die ID enthält.
@@ -225,18 +227,32 @@ def waffenschein_get_application_from_embed(message: discord.Message):
 
     if user_match:
         user_id = int(user_match.group(1))
+        license_key = None
+        lower_text = visible_text.lower()
+        if "großer waffenschein" in lower_text:
+            license_key = "gross"
+        elif "kleiner waffenschein" in lower_text:
+            license_key = "klein"
+
         candidates = [
             app for app in waffenschein_bewerbungen.values()
             if int(app.get("user_id", 0)) == user_id
+            and (license_key is None or app.get("license_key") == license_key)
         ]
 
-        # Bevorzugt eine noch offene/pending Bewerbung.
-        for app in candidates:
-            if app.get("status") == "pending":
-                return app
+        # NIEMALS eine bereits bezahlte Bewerbung als Fallback auswählen.
+        # Sonst kann eine alte bezahlte Bewerbung eine neue offene Bewerbung
+        # desselben Users überschreiben.
+        active_candidates = [
+            app for app in candidates
+            if app.get("status") in {"dm_started", "pending", "ticket_creating", "ticket_open"}
+        ]
 
-        if candidates:
-            return candidates[-1]
+        if active_candidates:
+            return max(
+                active_candidates,
+                key=lambda app: float(app.get("completed_at") or app.get("started_at") or 0)
+            )
 
     return None
 
@@ -328,6 +344,40 @@ def waffenschein_extract_license_key_from_message(message: discord.Message):
     return None
 
 
+def waffenschein_payment_is_confirmed(application: dict):
+    """
+    Liefert nur dann True, wenn die Zahlung tatsächlich bestätigt wurde.
+
+    Ältere/fehlerhafte Daten können noch status="paid" enthalten, obwohl
+    nie auf den Bezahl-Button gedrückt wurde. Deshalb wird zusätzlich ein
+    echter Zahlungsnachweis verlangt (paid_at + paid_by/paid_role_id).
+    """
+    if application.get("status") != "paid":
+        return False
+
+    paid_at = application.get("paid_at")
+    paid_by = application.get("paid_by")
+    paid_role_id = application.get("paid_role_id")
+
+    return bool(paid_at and (paid_by or paid_role_id))
+
+
+def waffenschein_repair_stale_paid_status(application: dict):
+    """
+    Repariert einen alten/stale paid-Status, wenn kein echter
+    Zahlungsnachweis vorhanden ist. Gibt True zurück, wenn repariert wurde.
+    """
+    if application.get("status") == "paid" and not waffenschein_payment_is_confirmed(application):
+        application["status"] = "pending"
+        application.pop("paid_at", None)
+        application.pop("paid_by", None)
+        application.pop("paid_role_id", None)
+        application.pop("ticket_closed_at", None)
+        save_waffenschein_data()
+        return True
+    return False
+
+
 async def waffenschein_resolve_application_from_message(message: discord.Message):
     """Ermittelt die Bewerbung zuverlässig für Ticket/Ablehnen-Buttons.
 
@@ -350,6 +400,11 @@ async def waffenschein_resolve_application_from_message(message: discord.Message
         # Auch gefundene alte Einträge dauerhaft mit der Nachricht verknüpfen.
         application["application_message_id"] = message.id
         application["application_channel_id"] = message.channel.id
+
+        # Falls ein alter Datensatz fälschlicherweise "paid" enthält, aber
+        # keinen echten Zahlungsnachweis besitzt, wird er wieder auf offen
+        # gesetzt. So wird eine neue unbezahlte Bewerbung nicht blockiert.
+        waffenschein_repair_stale_paid_status(application)
         save_waffenschein_data()
         return application
 
@@ -366,15 +421,16 @@ async def waffenschein_resolve_application_from_message(message: discord.Message
         and app.get("license_key") == recovered_license_key
     ]
 
-    for app in reversed(candidates):
-        if app.get("status") in {"pending", "ticket_creating", "ticket_open"}:
-            app["application_message_id"] = message.id
-            app["application_channel_id"] = message.channel.id
-            save_waffenschein_data()
-            return app
+    active_candidates = [
+        app for app in candidates
+        if app.get("status") in {"dm_started", "pending", "ticket_creating", "ticket_open"}
+    ]
 
-    if candidates:
-        app = candidates[-1]
+    if active_candidates:
+        app = max(
+            active_candidates,
+            key=lambda item: float(item.get("completed_at") or item.get("started_at") or 0)
+        )
         app["application_message_id"] = message.id
         app["application_channel_id"] = message.channel.id
         save_waffenschein_data()
@@ -986,11 +1042,16 @@ class WaffenscheinApplicationView(ui.View):
             return
 
         if application.get("status") == "paid":
-            await interaction.response.send_message(
-                "❌ Diese Bewerbung wurde bereits abgeschlossen und bezahlt.",
-                ephemeral=True
-            )
-            return
+            if waffenschein_payment_is_confirmed(application):
+                await interaction.response.send_message(
+                    "❌ Diese Bewerbung wurde bereits abgeschlossen und bezahlt.",
+                    ephemeral=True
+                )
+                return
+
+            # Alter/stale Status: Noch keine echte Zahlung bestätigt.
+            # Bewerbung wieder auf offen setzen und Ticket normal erstellen.
+            waffenschein_repair_stale_paid_status(application)
 
         # WICHTIG: Hier wird NICHT mehr geprüft, ob der Bewerber irgendeinen
         # Waffenschein besitzt. Ein vorhandener kleiner Schein darf z.B. die
@@ -1466,8 +1527,17 @@ class WaffenscheinPaidView(ui.View):
                         application = stored_application
                         break
 
-                if not application and candidates:
-                    application = candidates[-1]
+                if not application:
+                    active_candidates = [
+                        candidate
+                        for candidate in candidates
+                        if candidate.get("status") in {"pending", "ticket_creating", "ticket_open"}
+                    ]
+                    if active_candidates:
+                        application = max(
+                            active_candidates,
+                            key=lambda item: float(item.get("completed_at") or item.get("started_at") or 0)
+                        )
 
             # Zusätzlich nach der Bewerbungs-ID suchen.
             if not application:
@@ -1546,11 +1616,16 @@ class WaffenscheinPaidView(ui.View):
             return
 
         if application.get("status") == "paid":
-            await interaction.response.send_message(
-                "❌ Dieser Waffenschein wurde bereits als bezahlt markiert.",
-                ephemeral=True
-            )
-            return
+            if waffenschein_payment_is_confirmed(application):
+                await interaction.response.send_message(
+                    "❌ Dieser Waffenschein wurde bereits als bezahlt markiert.",
+                    ephemeral=True
+                )
+                return
+
+            # Kein echter Zahlungsnachweis vorhanden -> stale Status reparieren
+            # und die Zahlung normal verarbeiten.
+            waffenschein_repair_stale_paid_status(application)
 
         guild = interaction.guild
         if guild is None:
