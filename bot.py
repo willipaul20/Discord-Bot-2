@@ -111,9 +111,6 @@ waffenschein_bewerbungen = {}
 # verhindert doppelte Ticket-Erstellung bei fast gleichzeitigem Klick
 waffenschein_ticket_locks = set()
 
-# verhindert doppelte Zahlungsbestätigung / doppelte DMs
-waffenschein_paid_locks = set()
-
 
 def load_waffenschein_data():
     if not os.path.exists(WAFFENSCHEIN_DATA_FILE):
@@ -1007,30 +1004,21 @@ class WaffenscheinApplicationView(ui.View):
         interaction: discord.Interaction,
         button: ui.Button
     ):
+        await interaction.response.defer(ephemeral=True)
+
         if not has_role(
             interaction.user,
             WAFFENSCHEIN_BEARBEITUNG_ROLLE_ID
         ):
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ Nur Mitglieder der Waffenschein-Behörde dürfen ein Ticket öffnen.",
                 ephemeral=True
             )
             return
 
-        payment_lock_key = interaction.channel.id
-
-        if payment_lock_key in waffenschein_paid_locks:
-            await interaction.response.send_message(
-                "⏳ Die Zahlung wird bereits verarbeitet. Bitte einen Moment warten.",
-                ephemeral=True
-            )
-            return
-
-        waffenschein_paid_locks.add(payment_lock_key)
-
         guild = interaction.guild
         if guild is None:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ Dieser Button kann nur auf dem Server benutzt werden.",
                 ephemeral=True
             )
@@ -1041,7 +1029,7 @@ class WaffenscheinApplicationView(ui.View):
         )
 
         if not application:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ Die Bewerbung konnte nicht gefunden werden.",
                 ephemeral=True
             )
@@ -1049,7 +1037,7 @@ class WaffenscheinApplicationView(ui.View):
 
         # Eine abgelehnte oder bereits bezahlte Bewerbung kann nicht mehr geöffnet werden.
         if application.get("status") == "rejected":
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ Diese Bewerbung wurde bereits abgelehnt.",
                 ephemeral=True
             )
@@ -1057,7 +1045,7 @@ class WaffenscheinApplicationView(ui.View):
 
         if application.get("status") == "paid":
             if waffenschein_payment_is_confirmed(application):
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     "❌ Diese Bewerbung wurde bereits abgeschlossen und bezahlt.",
                     ephemeral=True
                 )
@@ -1073,7 +1061,6 @@ class WaffenscheinApplicationView(ui.View):
         # Entscheidend ist nur der Status dieser konkreten Bewerbung.
 
         application_id = application["id"]
-        ticket_lock_key = f"{application['user_id']}-{application['license_key']}"
 
         # Bereits gespeichertes Ticket bevorzugen.
         if application.get("ticket_channel_id"):
@@ -1086,7 +1073,7 @@ class WaffenscheinApplicationView(ui.View):
                 button.label = "Ticket bereits geöffnet"
                 button.emoji = "✅"
                 await interaction.message.edit(view=self)
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     "ℹ️ **Das Ticket wurde bereits eröffnet.**\n"
                     f"🎫 [Zum Ticket](<{ticket_link}>)",
                     ephemeral=True
@@ -1113,7 +1100,7 @@ class WaffenscheinApplicationView(ui.View):
                 button.emoji = "✅"
                 await interaction.message.edit(view=self)
                 ticket_link = f"https://discord.com/channels/{guild.id}/{existing_ticket.id}"
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     "ℹ️ **Das Ticket wurde bereits eröffnet.**\n"
                     f"🎫 [Zum Ticket](<{ticket_link}>)",
                     ephemeral=True
@@ -1124,13 +1111,13 @@ class WaffenscheinApplicationView(ui.View):
             save_waffenschein_data()
 
         if application.get("status") != "pending":
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ Diese Bewerbung ist aktuell nicht für ein Ticket freigegeben.",
                 ephemeral=True
             )
             return
 
-        if ticket_lock_key in waffenschein_ticket_locks:
+        if application_id in waffenschein_ticket_locks:
             existing_ticket = await waffenschein_find_existing_ticket(
                 guild,
                 int(application["user_id"]),
@@ -1145,14 +1132,14 @@ class WaffenscheinApplicationView(ui.View):
                 button.emoji = "✅"
                 await interaction.message.edit(view=self)
                 ticket_link = f"https://discord.com/channels/{guild.id}/{existing_ticket.id}"
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     "ℹ️ **Das Ticket wurde bereits eröffnet.**\n"
                     f"🎫 [Zum Ticket](<{ticket_link}>)",
                     ephemeral=True
                 )
                 return
 
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "⏳ Das Ticket wird gerade bereits erstellt. Bitte einen Moment warten.",
                 ephemeral=True
             )
@@ -1167,14 +1154,14 @@ class WaffenscheinApplicationView(ui.View):
         authority_role = guild.get_role(WAFFENSCHEIN_BEARBEITUNG_ROLLE_ID)
 
         if category is None:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ Die konfigurierte Ticket-Kategorie wurde nicht gefunden.",
                 ephemeral=True
             )
             return
 
         if authority_role is None:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ Die Waffenschein-Behördenrolle wurde nicht gefunden.",
                 ephemeral=True
             )
@@ -1202,14 +1189,14 @@ class WaffenscheinApplicationView(ui.View):
             button.emoji = "✅"
             await interaction.message.edit(view=self)
             ticket_link = f"https://discord.com/channels/{guild.id}/{existing_ticket.id}"
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "ℹ️ **Das Ticket wurde bereits eröffnet.**\n"
                 f"🎫 [Zum Ticket](<{ticket_link}>)",
                 ephemeral=True
             )
             return
 
-        waffenschein_ticket_locks.add(ticket_lock_key)
+        waffenschein_ticket_locks.add(application_id)
 
         try:
             application["status"] = "ticket_creating"
@@ -1230,7 +1217,7 @@ class WaffenscheinApplicationView(ui.View):
                 button.emoji = "✅"
                 await interaction.message.edit(view=self)
                 ticket_link = f"https://discord.com/channels/{guild.id}/{existing_ticket.id}"
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     "ℹ️ **Das Ticket wurde bereits eröffnet.**\n"
                     f"🎫 [Zum Ticket](<{ticket_link}>)",
                     ephemeral=True
@@ -1320,7 +1307,7 @@ class WaffenscheinApplicationView(ui.View):
             await interaction.message.edit(view=self)
 
             ticket_link = f"https://discord.com/channels/{guild.id}/{ticket.id}"
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "✅ **Das Ticket wurde erfolgreich eröffnet!**\n"
                 f"🎫 [Zum Ticket](<{ticket_link}>)",
                 ephemeral=True
@@ -1342,7 +1329,7 @@ class WaffenscheinApplicationView(ui.View):
             print(f"❌ Fehler beim Erstellen des Waffenschein-Tickets: {e}")
 
             if not interaction.response.is_done():
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     "❌ Beim Erstellen des Tickets ist ein Fehler aufgetreten. Bitte versuche es erneut.",
                     ephemeral=True
                 )
@@ -1352,7 +1339,7 @@ class WaffenscheinApplicationView(ui.View):
                     ephemeral=True
                 )
         finally:
-            waffenschein_ticket_locks.discard(ticket_lock_key)
+            waffenschein_ticket_locks.discard(application_id)
 
     @ui.button(
         label="Ablehnen",
@@ -1484,11 +1471,13 @@ class WaffenscheinPaidView(ui.View):
             interaction.user,
             WAFFENSCHEIN_BEARBEITUNG_ROLLE_ID
         ):
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ Nur Mitglieder der Waffenschein-Behörde dürfen die Zahlung bestätigen.",
                 ephemeral=True
             )
             return
+
+        await interaction.response.defer(ephemeral=True)
 
         application = None
 
@@ -1617,14 +1606,14 @@ class WaffenscheinPaidView(ui.View):
                     save_waffenschein_data()
 
         if not application:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ Der Bewerber dieses Tickets konnte nicht ermittelt werden.",
                 ephemeral=True
             )
             return
 
         if application.get("status") == "rejected":
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ Diese Bewerbung wurde abgelehnt.",
                 ephemeral=True
             )
@@ -1632,7 +1621,7 @@ class WaffenscheinPaidView(ui.View):
 
         if application.get("status") == "paid":
             if waffenschein_payment_is_confirmed(application):
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     "❌ Dieser Waffenschein wurde bereits als bezahlt markiert.",
                     ephemeral=True
                 )
@@ -1644,7 +1633,7 @@ class WaffenscheinPaidView(ui.View):
 
         guild = interaction.guild
         if guild is None:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ Dieser Button kann nur auf dem Server benutzt werden.",
                 ephemeral=True
             )
@@ -1663,7 +1652,7 @@ class WaffenscheinPaidView(ui.View):
                 applicant = None
 
         if applicant is None:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ Der Bewerber konnte nicht gefunden werden. "
                 "Das Ticket wurde deshalb noch nicht geschlossen.",
                 ephemeral=True
@@ -1679,7 +1668,7 @@ class WaffenscheinPaidView(ui.View):
         role = guild.get_role(role_id)
 
         if role is None:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ Die passende Waffenschein-Rolle wurde nicht gefunden.",
                 ephemeral=True
             )
@@ -1694,14 +1683,14 @@ class WaffenscheinPaidView(ui.View):
                 )
             )
         except discord.Forbidden:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ Ich kann dem Bewerber die Rolle nicht geben. "
                 "Bitte überprüfe die Rollenposition des Bots.",
                 ephemeral=True
             )
             return
         except Exception as e:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 f"❌ Die Rolle konnte nicht vergeben werden: `{e}`",
                 ephemeral=True
             )
@@ -1744,7 +1733,7 @@ class WaffenscheinPaidView(ui.View):
         try:
             # Bewusst schlicht gehalten: genau die gewünschte Meldung,
             # bevor der Channel gelöscht wird.
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "🗑️ **Das Ticket wird jetzt geschlossen.**"
             )
         except Exception:
