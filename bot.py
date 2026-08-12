@@ -737,60 +737,12 @@ class WaffenscheinApplicationView(ui.View):
             # Nur diese konkrete Bewerbungsnachricht wird geändert.
             await interaction.message.edit(view=self)
 
+            # Erfolgsnachricht bewusst nicht mehr als Ephemeral senden,
+            # damit sie sichtbar ist und der neu erstellte Ticket-Kanal direkt
+            # verlinkt wird.
             await interaction.response.send_message(
-                f"✅ Ticket erfolgreich erstellt: {ticket.mention}",
-                ephemeral=True
+                f"✅ Das Ticket wurde erfolgreich geöffnet: {ticket.mention}"
             )
-
-            # ==========================================
-            # TICKET NACHRICHT 1
-            # ==========================================
-            applicant_mention = (
-                applicant.mention
-                if applicant
-                else f"<@{application['user_id']}>"
-            )
-
-            accepted_embed = discord.Embed(
-                title="Waffenschein beantragt von "
-                      f"{applicant_mention} angenommen.",
-                description=(
-                    "Bitte bezahle jetzt nurnoch den Waffenschein ab "
-                    "und dann hast du schon deinen Waffenschein!"
-                ),
-                color=discord.Color.blue()
-            )
-
-            accepted_embed.set_footer(
-                text="Sirius RP • Waffenschein-Behörde"
-            )
-
-            # Diese Nachricht kommt IMMER als erste Nachricht ins Ticket.
-            await ticket.send(
-                embed=accepted_embed,
-                view=WaffenscheinPaidView()
-            )
-
-            # ==========================================
-            # TICKET NACHRICHT 2
-            # ==========================================
-            preis = (
-                "6000€"
-                if application["license_key"] == "gross"
-                else "3000€"
-            )
-
-            payment_embed = discord.Embed(
-                title="Bezahlen",
-                description=(
-                    f"**Bitte bezahle {preis} an SiriusRPManagment.**\n\n"
-                    "***⚠️Vergesse das Beweisbidl/Video nicht! "
-                    "Ohne Beweis = Kein Waffenschein⚠️***"
-                ),
-                color=discord.Color.red()
-            )
-
-            await ticket.send(embed=payment_embed)
 
             await waffenschein_log(
                 application,
