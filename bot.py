@@ -111,6 +111,9 @@ waffenschein_bewerbungen = {}
 # verhindert doppelte Ticket-Erstellung bei fast gleichzeitigem Klick
 waffenschein_ticket_locks = set()
 
+# verhindert doppelte Zahlungsbestätigung / doppelte DMs
+waffenschein_paid_locks = set()
+
 
 def load_waffenschein_data():
     if not os.path.exists(WAFFENSCHEIN_DATA_FILE):
@@ -1014,6 +1017,17 @@ class WaffenscheinApplicationView(ui.View):
             )
             return
 
+        payment_lock_key = interaction.channel.id
+
+        if payment_lock_key in waffenschein_paid_locks:
+            await interaction.response.send_message(
+                "⏳ Die Zahlung wird bereits verarbeitet. Bitte einen Moment warten.",
+                ephemeral=True
+            )
+            return
+
+        waffenschein_paid_locks.add(payment_lock_key)
+
         guild = interaction.guild
         if guild is None:
             await interaction.response.send_message(
@@ -1059,6 +1073,7 @@ class WaffenscheinApplicationView(ui.View):
         # Entscheidend ist nur der Status dieser konkreten Bewerbung.
 
         application_id = application["id"]
+        ticket_lock_key = f"{application['user_id']}-{application['license_key']}"
 
         # Bereits gespeichertes Ticket bevorzugen.
         if application.get("ticket_channel_id"):
@@ -1115,7 +1130,28 @@ class WaffenscheinApplicationView(ui.View):
             )
             return
 
-        if application_id in waffenschein_ticket_locks:
+        if ticket_lock_key in waffenschein_ticket_locks:
+            existing_ticket = await waffenschein_find_existing_ticket(
+                guild,
+                int(application["user_id"]),
+                application["license_key"]
+            )
+            if existing_ticket:
+                application["ticket_channel_id"] = existing_ticket.id
+                application["status"] = "ticket_open"
+                save_waffenschein_data()
+                button.disabled = True
+                button.label = "Ticket bereits geöffnet"
+                button.emoji = "✅"
+                await interaction.message.edit(view=self)
+                ticket_link = f"https://discord.com/channels/{guild.id}/{existing_ticket.id}"
+                await interaction.response.send_message(
+                    "ℹ️ **Das Ticket wurde bereits eröffnet.**\n"
+                    f"🎫 [Zum Ticket](<{ticket_link}>)",
+                    ephemeral=True
+                )
+                return
+
             await interaction.response.send_message(
                 "⏳ Das Ticket wird gerade bereits erstellt. Bitte einen Moment warten.",
                 ephemeral=True
@@ -1173,7 +1209,7 @@ class WaffenscheinApplicationView(ui.View):
             )
             return
 
-        waffenschein_ticket_locks.add(application_id)
+        waffenschein_ticket_locks.add(ticket_lock_key)
 
         try:
             application["status"] = "ticket_creating"
@@ -1316,7 +1352,7 @@ class WaffenscheinApplicationView(ui.View):
                     ephemeral=True
                 )
         finally:
-            waffenschein_ticket_locks.discard(application_id)
+            waffenschein_ticket_locks.discard(ticket_lock_key)
 
     @ui.button(
         label="Ablehnen",
