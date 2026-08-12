@@ -477,6 +477,69 @@ async def waffenschein_log(
         print(f"❌ Fehler beim Waffenschein-Logging: {e}")
 
 
+async def waffenschein_update_application_message(
+    application: dict,
+    *,
+    status_text: str = None,
+    color: discord.Color = None,
+    disable_buttons: bool = False,
+    button_label: str = None
+):
+    """Aktualisiert die ursprüngliche Bewerbungsnachricht."""
+    channel_id = application.get("application_channel_id") or WAFFENSCHEIN_Bewerbung_KANAL_ID
+    message_id = application.get("application_message_id")
+
+    if not message_id:
+        return False
+
+    try:
+        channel = bot.get_channel(int(channel_id))
+        if channel is None:
+            channel = await bot.fetch_channel(int(channel_id))
+        message = await channel.fetch_message(int(message_id))
+        if not message.embeds:
+            return False
+
+        embed = message.embeds[0].copy()
+        if color is not None:
+            embed.color = color
+
+        description = embed.description or ""
+        description = re.sub(r"\n\*\*Status:\*\*[^\n]*", "", description, flags=re.IGNORECASE).rstrip()
+        if status_text:
+            description += f"\n**Status:** {status_text}"
+        embed.description = description
+
+        view = None
+        if disable_buttons:
+            view = WaffenscheinApplicationView()
+            for item in view.children:
+                if isinstance(item, ui.Button):
+                    item.disabled = True
+                    if button_label and item.custom_id == "waffenschein_ticket_open":
+                        item.label = button_label
+                        item.emoji = "✅"
+
+        await message.edit(embed=embed, view=view)
+        return True
+    except discord.NotFound:
+        return False
+    except Exception as e:
+        print(f"❌ Fehler beim Aktualisieren der Waffenschein-Bewerbung: {e}")
+        return False
+
+
+async def waffenschein_find_ticket_by_exact_name(guild: discord.Guild, application: dict):
+    """Findet ein vorhandenes Ticket über den eindeutigen Ticketnamen."""
+    license_part = "gross" if application.get("license_key") == "gross" else "klein"
+    user_id = str(application.get("user_id", ""))
+    expected_name = f"waffenschein-{license_part}-{user_id[-6:]}"
+    for channel in guild.text_channels:
+        if channel.name == expected_name:
+            return channel
+    return None
+
+
 async def waffenschein_finish_application(user: discord.User, application: dict):
     """Postet die fertige Bewerbung im Bewerbungs-Kanal."""
     channel = bot.get_channel(WAFFENSCHEIN_Bewerbung_KANAL_ID)
@@ -498,7 +561,7 @@ async def waffenschein_finish_application(user: discord.User, application: dict)
             f"**Bewerbung abgeschickt:** <t:{timestamp}:F>\n"
             f"**Status:** 🟡 Offen"
         ),
-        color=discord.Color.red()
+        color=discord.Color.yellow()
     )
 
     embed.add_field(
@@ -920,13 +983,55 @@ class WaffenscheinApplicationView(ui.View):
         except Exception:
             applicant = None
 
+        # Zusätzliche Prüfung verhindert doppelte Tickets auch dann, wenn
+        # die alte Button-Ansicht noch aktiv ist.
+        if application.get("status") == "ticket_creating":
+            await interaction.response.send_message(
+                "⏳ Das Ticket wird gerade bereits erstellt. Bitte einen Moment warten.",
+                ephemeral=True
+            )
+            return
+
+        existing_ticket = await waffenschein_find_ticket_by_exact_name(guild, application)
+        if existing_ticket:
+            application["ticket_channel_id"] = existing_ticket.id
+            application["status"] = "ticket_open"
+            save_waffenschein_data()
+            button.disabled = True
+            button.label = "Ticket bereits geöffnet"
+            button.emoji = "✅"
+            await interaction.message.edit(view=self)
+            ticket_link = f"https://discord.com/channels/{guild.id}/{existing_ticket.id}"
+            await interaction.response.send_message(
+                "ℹ️ **Das Ticket wurde bereits eröffnet.**\n"
+                f"🎫 [Zum Ticket](<{ticket_link}>)",
+                ephemeral=True
+            )
+            return
+
         waffenschein_ticket_locks.add(application_id)
 
         try:
-            # Vor dem Erstellen markieren, damit auch bei sehr schnellen
-            # Doppelklicks kein zweiter Channel erstellt werden kann.
             application["status"] = "ticket_creating"
             save_waffenschein_data()
+
+            # Noch einmal nach einem Ticket suchen, nachdem der Lock gesetzt wurde.
+            existing_ticket = await waffenschein_find_ticket_by_exact_name(guild, application)
+            if existing_ticket:
+                application["ticket_channel_id"] = existing_ticket.id
+                application["status"] = "ticket_open"
+                save_waffenschein_data()
+                button.disabled = True
+                button.label = "Ticket bereits geöffnet"
+                button.emoji = "✅"
+                await interaction.message.edit(view=self)
+                ticket_link = f"https://discord.com/channels/{guild.id}/{existing_ticket.id}"
+                await interaction.response.send_message(
+                    "ℹ️ **Das Ticket wurde bereits eröffnet.**\n"
+                    f"🎫 [Zum Ticket](<{ticket_link}>)",
+                    ephemeral=True
+                )
+                return
 
             overwrites = {
                 guild.default_role: discord.PermissionOverwrite(
@@ -1034,13 +1139,12 @@ class WaffenscheinApplicationView(ui.View):
             # Nur diese konkrete Bewerbungsnachricht wird geändert.
             await interaction.message.edit(view=self)
 
-            # Erfolgsnachricht bewusst nicht mehr als Ephemeral senden,
-            # damit sie sichtbar ist und der neu erstellte Ticket-Kanal direkt
-            # verlinkt wird.
+            # Die Bestätigung soll nur die Person sehen, die den Button gedrückt hat.
             ticket_link = f"https://discord.com/channels/{guild.id}/{ticket.id}"
             await interaction.response.send_message(
                 f"✅ **Das Ticket wurde erfolgreich eröffnet!**\n"
-                f"🎫 [Zum Ticket](<{ticket_link}>)"
+                f"🎫 [Zum Ticket](<{ticket_link}>)",
+                ephemeral=True
             )
 
             await waffenschein_log(
@@ -1134,6 +1238,13 @@ class WaffenscheinApplicationView(ui.View):
             )
             return
 
+        if application.get("status") == "paid":
+            await interaction.response.send_message(
+                "❌ Diese Bewerbung ist bereits abgeschlossen und bezahlt.",
+                ephemeral=True
+            )
+            return
+
         if application.get("status") != "pending":
             await interaction.response.send_message(
                 "❌ Diese Bewerbung kann aktuell nicht abgelehnt werden.",
@@ -1150,8 +1261,15 @@ class WaffenscheinApplicationView(ui.View):
         embed = interaction.message.embeds[0]
         embed.color = discord.Color.red()
 
+        clean_description = re.sub(
+            r"\n\*\*Status:\*\*[^\n]*",
+            "",
+            embed.description or "",
+            flags=re.IGNORECASE
+        ).rstrip()
         embed.description = (
-            f"{embed.description}\n\n"
+            f"{clean_description}\n"
+            "**Status:** 🔴 Abgelehnt\n\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
             "❌ **BEWERBUNG ABGELEHNT**\n"
             f"**Abgelehnt von:** {interaction.user.mention}\n"
@@ -1417,6 +1535,15 @@ class WaffenscheinPaidView(ui.View):
         application["paid_role_id"] = role.id
         application["ticket_closed_at"] = time.time()
         save_waffenschein_data()
+
+        # Bewerbung im Bewerbungs-Kanal grün markieren und beide Buttons deaktivieren.
+        await waffenschein_update_application_message(
+            application,
+            status_text="🟢 Bezahlt / Waffenschein erteilt",
+            color=discord.Color.green(),
+            disable_buttons=True,
+            button_label="Bewerbung abgeschlossen"
+        )
 
         await waffenschein_log(
             application,
@@ -3228,19 +3355,23 @@ async def on_member_remove(member):
 
 @bot.event
 async def on_ready():
-    bot.add_view(LeaderboardTop30View())
-    bot.add_view(SetupEintragView())
-    bot.add_view(BanBoloMainView())
-    bot.add_view(StartFeedbackView())
-    bot.add_view(StartCallAdminView())
-    bot.add_view(SearchResultView())
-    bot.add_view(BanBoloAbschliessenView())
-    bot.add_view(TimeLeaderboardView())
-    bot.add_view(VerifyView())
-    bot.add_view(StartBewerbungView())
-    bot.add_view(WaffenscheinView())
-    bot.add_view(WaffenscheinApplicationView())
-    bot.add_view(WaffenscheinPaidView())
+    # Persistent Views nur einmal pro Bot-Prozess registrieren. Das verhindert,
+    # dass ein Discord-Reconnect dieselben Button-Handler mehrfach registriert.
+    if not getattr(bot, "_persistent_views_registered", False):
+        bot.add_view(LeaderboardTop30View())
+        bot.add_view(SetupEintragView())
+        bot.add_view(BanBoloMainView())
+        bot.add_view(StartFeedbackView())
+        bot.add_view(StartCallAdminView())
+        bot.add_view(SearchResultView())
+        bot.add_view(BanBoloAbschliessenView())
+        bot.add_view(TimeLeaderboardView())
+        bot.add_view(VerifyView())
+        bot.add_view(StartBewerbungView())
+        bot.add_view(WaffenscheinView())
+        bot.add_view(WaffenscheinApplicationView())
+        bot.add_view(WaffenscheinPaidView())
+        bot._persistent_views_registered = True
 
     try:
         synced = await bot.tree.sync()
