@@ -110,10 +110,6 @@ waffenschein_bewerbungen = {}
 
 # verhindert doppelte Ticket-Erstellung bei fast gleichzeitigem Klick
 waffenschein_ticket_locks = set()
-# Zusätzliche atomare Sperre: verhindert doppelte Ticket-Erstellung bei
-# gleichzeitig ausgelösten Button-Interaktionen oder mehrfach registrierten Views.
-waffenschein_ticket_creation_lock = asyncio.Lock()
-waffenschein_views_registered = False
 
 
 def load_waffenschein_data():
@@ -1037,150 +1033,153 @@ class WaffenscheinApplicationView(ui.View):
             )
             return
 
-        # Nur ein Ticket-Erstellungsvorgang darf gleichzeitig laufen.
-        # Dadurch kann ein doppelter Button-Callback nicht zwei Channels erzeugen.
-        await waffenschein_ticket_creation_lock.acquire()
-        try:
-            # Eine abgelehnte oder bereits bezahlte Bewerbung kann nicht mehr geöffnet werden.
-            if application.get("status") == "rejected":
-                await interaction.response.send_message(
-                    "❌ Diese Bewerbung wurde bereits abgelehnt.",
-                    ephemeral=True
-                )
-                return
-
-            if application.get("status") == "paid":
-                if waffenschein_payment_is_confirmed(application):
-                    await interaction.response.send_message(
-                        "❌ Diese Bewerbung wurde bereits abgeschlossen und bezahlt.",
-                        ephemeral=True
-                    )
-                    return
-
-                # Alter/stale Status: Noch keine echte Zahlung bestätigt.
-                # Bewerbung wieder auf offen setzen und Ticket normal erstellen.
-                waffenschein_repair_stale_paid_status(application)
-
-            # WICHTIG: Hier wird NICHT mehr geprüft, ob der Bewerber irgendeinen
-            # Waffenschein besitzt. Ein vorhandener kleiner Schein darf z.B. die
-            # Bewerbung für den großen Schein nicht blockieren und umgekehrt.
-            # Entscheidend ist nur der Status dieser konkreten Bewerbung.
-
-            application_id = application["id"]
-
-            # Bereits gespeichertes Ticket bevorzugen.
-            if application.get("ticket_channel_id"):
-                existing_ticket = guild.get_channel(
-                    int(application["ticket_channel_id"])
-                )
-                if existing_ticket:
-                    ticket_link = f"https://discord.com/channels/{guild.id}/{existing_ticket.id}"
-                    button.disabled = True
-                    button.label = "Ticket bereits geöffnet"
-                    button.emoji = "✅"
-                    await interaction.message.edit(view=self)
-                    await interaction.response.send_message(
-                        "ℹ️ **Das Ticket wurde bereits eröffnet.**\n"
-                        f"🎫 [Zum Ticket](<{ticket_link}>)",
-                        ephemeral=True
-                    )
-                    return
-
-                application["ticket_channel_id"] = None
-                if application.get("status") == "ticket_open":
-                    application["status"] = "pending"
-                save_waffenschein_data()
-
-            if application.get("status") == "ticket_creating":
-                existing_ticket = await waffenschein_find_existing_ticket(
-                    guild,
-                    int(application["user_id"]),
-                    application["license_key"]
-                )
-                if existing_ticket:
-                    application["ticket_channel_id"] = existing_ticket.id
-                    application["status"] = "ticket_open"
-                    save_waffenschein_data()
-                    button.disabled = True
-                    button.label = "Ticket bereits geöffnet"
-                    button.emoji = "✅"
-                    await interaction.message.edit(view=self)
-                    ticket_link = f"https://discord.com/channels/{guild.id}/{existing_ticket.id}"
-                    await interaction.response.send_message(
-                        "ℹ️ **Das Ticket wurde bereits eröffnet.**\n"
-                        f"🎫 [Zum Ticket](<{ticket_link}>)",
-                        ephemeral=True
-                    )
-                    return
-                # Falls kein Ticket mehr existiert, darf die Erstellung erneut versucht werden.
-                application["status"] = "pending"
-                save_waffenschein_data()
-
-            if application.get("status") != "pending":
-                await interaction.response.send_message(
-                    "❌ Diese Bewerbung ist aktuell nicht für ein Ticket freigegeben.",
-                    ephemeral=True
-                )
-                return
-
-            if application_id in waffenschein_ticket_locks:
-                existing_ticket = await waffenschein_find_existing_ticket(
-                    guild,
-                    int(application["user_id"]),
-                    application["license_key"]
-                )
-                if existing_ticket:
-                    application["ticket_channel_id"] = existing_ticket.id
-                    application["status"] = "ticket_open"
-                    save_waffenschein_data()
-                    button.disabled = True
-                    button.label = "Ticket bereits geöffnet"
-                    button.emoji = "✅"
-                    await interaction.message.edit(view=self)
-                    ticket_link = f"https://discord.com/channels/{guild.id}/{existing_ticket.id}"
-                    await interaction.response.send_message(
-                        "ℹ️ **Das Ticket wurde bereits eröffnet.**\n"
-                        f"🎫 [Zum Ticket](<{ticket_link}>)",
-                        ephemeral=True
-                    )
-                    return
-
-                await interaction.response.send_message(
-                    "⏳ Das Ticket wird gerade bereits erstellt. Bitte einen Moment warten.",
-                    ephemeral=True
-                )
-                return
-
-            category_id = (
-                GROSSER_WAFFENSCHEIN_KATEGORIE_ID
-                if application["license_key"] == "gross"
-                else KLEINER_WAFFENSCHEIN_KATEGORIE_ID
+        # Eine abgelehnte oder bereits bezahlte Bewerbung kann nicht mehr geöffnet werden.
+        if application.get("status") == "rejected":
+            await interaction.response.send_message(
+                "❌ Diese Bewerbung wurde bereits abgelehnt.",
+                ephemeral=True
             )
-            category = guild.get_channel(category_id)
-            authority_role = guild.get_role(WAFFENSCHEIN_BEARBEITUNG_ROLLE_ID)
+            return
 
-            if category is None:
+        if application.get("status") == "paid":
+            if waffenschein_payment_is_confirmed(application):
                 await interaction.response.send_message(
-                    "❌ Die konfigurierte Ticket-Kategorie wurde nicht gefunden.",
+                    "❌ Diese Bewerbung wurde bereits abgeschlossen und bezahlt.",
                     ephemeral=True
                 )
                 return
 
-            if authority_role is None:
+            # Alter/stale Status: Noch keine echte Zahlung bestätigt.
+            # Bewerbung wieder auf offen setzen und Ticket normal erstellen.
+            waffenschein_repair_stale_paid_status(application)
+
+        # WICHTIG: Hier wird NICHT mehr geprüft, ob der Bewerber irgendeinen
+        # Waffenschein besitzt. Ein vorhandener kleiner Schein darf z.B. die
+        # Bewerbung für den großen Schein nicht blockieren und umgekehrt.
+        # Entscheidend ist nur der Status dieser konkreten Bewerbung.
+
+        application_id = application["id"]
+
+        # Bereits gespeichertes Ticket bevorzugen.
+        if application.get("ticket_channel_id"):
+            existing_ticket = guild.get_channel(
+                int(application["ticket_channel_id"])
+            )
+            if existing_ticket:
+                ticket_link = f"https://discord.com/channels/{guild.id}/{existing_ticket.id}"
+                button.disabled = True
+                button.label = "Ticket bereits geöffnet"
+                button.emoji = "✅"
+                await interaction.message.edit(view=self)
                 await interaction.response.send_message(
-                    "❌ Die Waffenschein-Behördenrolle wurde nicht gefunden.",
+                    "ℹ️ **Das Ticket wurde bereits eröffnet.**\n"
+                    f"🎫 [Zum Ticket](<{ticket_link}>)",
                     ephemeral=True
                 )
                 return
 
-            try:
-                applicant = guild.get_member(int(application["user_id"]))
-                if applicant is None:
-                    applicant = await guild.fetch_member(int(application["user_id"]))
-            except Exception:
-                applicant = None
+            application["ticket_channel_id"] = None
+            if application.get("status") == "ticket_open":
+                application["status"] = "pending"
+            save_waffenschein_data()
 
-            # Exakte Prüfung direkt vor create_text_channel.
+        if application.get("status") == "ticket_creating":
+            existing_ticket = await waffenschein_find_existing_ticket(
+                guild,
+                int(application["user_id"]),
+                application["license_key"]
+            )
+            if existing_ticket:
+                application["ticket_channel_id"] = existing_ticket.id
+                application["status"] = "ticket_open"
+                save_waffenschein_data()
+                button.disabled = True
+                button.label = "Ticket bereits geöffnet"
+                button.emoji = "✅"
+                await interaction.message.edit(view=self)
+                ticket_link = f"https://discord.com/channels/{guild.id}/{existing_ticket.id}"
+                await interaction.response.send_message(
+                    "ℹ️ **Das Ticket wurde bereits eröffnet.**\n"
+                    f"🎫 [Zum Ticket](<{ticket_link}>)",
+                    ephemeral=True
+                )
+                return
+            # Falls kein Ticket mehr existiert, darf die Erstellung erneut versucht werden.
+            application["status"] = "pending"
+            save_waffenschein_data()
+
+        if application.get("status") != "pending":
+            await interaction.response.send_message(
+                "❌ Diese Bewerbung ist aktuell nicht für ein Ticket freigegeben.",
+                ephemeral=True
+            )
+            return
+
+        if application_id in waffenschein_ticket_locks:
+            await interaction.response.send_message(
+                "⏳ Das Ticket wird gerade bereits erstellt. Bitte einen Moment warten.",
+                ephemeral=True
+            )
+            return
+
+        category_id = (
+            GROSSER_WAFFENSCHEIN_KATEGORIE_ID
+            if application["license_key"] == "gross"
+            else KLEINER_WAFFENSCHEIN_KATEGORIE_ID
+        )
+        category = guild.get_channel(category_id)
+        authority_role = guild.get_role(WAFFENSCHEIN_BEARBEITUNG_ROLLE_ID)
+
+        if category is None:
+            await interaction.response.send_message(
+                "❌ Die konfigurierte Ticket-Kategorie wurde nicht gefunden.",
+                ephemeral=True
+            )
+            return
+
+        if authority_role is None:
+            await interaction.response.send_message(
+                "❌ Die Waffenschein-Behördenrolle wurde nicht gefunden.",
+                ephemeral=True
+            )
+            return
+
+        try:
+            applicant = guild.get_member(int(application["user_id"]))
+            if applicant is None:
+                applicant = await guild.fetch_member(int(application["user_id"]))
+        except Exception:
+            applicant = None
+
+        # Exakte Prüfung direkt vor create_text_channel.
+        existing_ticket = await waffenschein_find_existing_ticket(
+            guild,
+            int(application["user_id"]),
+            application["license_key"]
+        )
+        if existing_ticket:
+            application["ticket_channel_id"] = existing_ticket.id
+            application["status"] = "ticket_open"
+            save_waffenschein_data()
+            button.disabled = True
+            button.label = "Ticket bereits geöffnet"
+            button.emoji = "✅"
+            await interaction.message.edit(view=self)
+            ticket_link = f"https://discord.com/channels/{guild.id}/{existing_ticket.id}"
+            await interaction.response.send_message(
+                "ℹ️ **Das Ticket wurde bereits eröffnet.**\n"
+                f"🎫 [Zum Ticket](<{ticket_link}>)",
+                ephemeral=True
+            )
+            return
+
+        waffenschein_ticket_locks.add(application_id)
+
+        try:
+            application["status"] = "ticket_creating"
+            save_waffenschein_data()
+
+            # Zweite Prüfung nach dem Lock, um Race Conditions zu vermeiden.
             existing_ticket = await waffenschein_find_existing_ticket(
                 guild,
                 int(application["user_id"]),
@@ -1202,152 +1201,122 @@ class WaffenscheinApplicationView(ui.View):
                 )
                 return
 
-            waffenschein_ticket_locks.add(application_id)
-
-            try:
-                application["status"] = "ticket_creating"
-                save_waffenschein_data()
-
-                # Zweite Prüfung nach dem Lock, um Race Conditions zu vermeiden.
-                existing_ticket = await waffenschein_find_existing_ticket(
-                    guild,
-                    int(application["user_id"]),
-                    application["license_key"]
+            overwrites = {
+                guild.default_role: discord.PermissionOverwrite(view_channel=False),
+                authority_role: discord.PermissionOverwrite(
+                    view_channel=True,
+                    send_messages=True,
+                    read_message_history=True,
+                    embed_links=True,
+                    attach_files=True
                 )
-                if existing_ticket:
-                    application["ticket_channel_id"] = existing_ticket.id
-                    application["status"] = "ticket_open"
-                    save_waffenschein_data()
-                    button.disabled = True
-                    button.label = "Ticket bereits geöffnet"
-                    button.emoji = "✅"
-                    await interaction.message.edit(view=self)
-                    ticket_link = f"https://discord.com/channels/{guild.id}/{existing_ticket.id}"
-                    await interaction.response.send_message(
-                        "ℹ️ **Das Ticket wurde bereits eröffnet.**\n"
-                        f"🎫 [Zum Ticket](<{ticket_link}>)",
-                        ephemeral=True
-                    )
-                    return
+            }
 
-                overwrites = {
-                    guild.default_role: discord.PermissionOverwrite(view_channel=False),
-                    authority_role: discord.PermissionOverwrite(
-                        view_channel=True,
-                        send_messages=True,
-                        read_message_history=True,
-                        embed_links=True,
-                        attach_files=True
-                    )
-                }
-
-                if applicant:
-                    overwrites[applicant] = discord.PermissionOverwrite(
-                        view_channel=True,
-                        send_messages=True,
-                        read_message_history=True,
-                        embed_links=True,
-                        attach_files=True
-                    )
-
-                channel_name = (
-                    f"waffenschein-{'gross' if application['license_key'] == 'gross' else 'klein'}-"
-                    f"{str(application['user_id'])[-6:]}"
+            if applicant:
+                overwrites[applicant] = discord.PermissionOverwrite(
+                    view_channel=True,
+                    send_messages=True,
+                    read_message_history=True,
+                    embed_links=True,
+                    attach_files=True
                 )
 
-                ticket = await guild.create_text_channel(
-                    name=channel_name,
-                    category=category,
-                    overwrites=overwrites,
-                    topic=(
-                        f"Waffenschein-Bewerbung {application_id} | "
-                        f"User {application['user_id']}"
-                    )
+            channel_name = (
+                f"waffenschein-{'gross' if application['license_key'] == 'gross' else 'klein'}-"
+                f"{str(application['user_id'])[-6:]}"
+            )
+
+            ticket = await guild.create_text_channel(
+                name=channel_name,
+                category=category,
+                overwrites=overwrites,
+                topic=(
+                    f"Waffenschein-Bewerbung {application_id} | "
+                    f"User {application['user_id']}"
                 )
+            )
 
-                applicant_mention = applicant.mention if applicant else f"<@{application['user_id']}>"
-                applicant_name = applicant.display_name if applicant else application.get("username", "Bewerber")
+            applicant_mention = applicant.mention if applicant else f"<@{application['user_id']}>"
+            applicant_name = applicant.display_name if applicant else application.get("username", "Bewerber")
 
-                annahme_embed = discord.Embed(
-                    title="🛡️ Waffenschein-Antrag angenommen",
-                    description=(
-                        f"**{applicant_name}** hat einen **{application['lizenz']}** beantragt.\n\n"
-                        "Bitte bezahle jetzt nur noch den Waffenschein ab. "
-                        "Nach bestätigter Zahlung wird dir die entsprechende Rolle vergeben."
-                    ),
-                    color=discord.Color.blue()
+            annahme_embed = discord.Embed(
+                title="🛡️ Waffenschein-Antrag angenommen",
+                description=(
+                    f"**{applicant_name}** hat einen **{application['lizenz']}** beantragt.\n\n"
+                    "Bitte bezahle jetzt nur noch den Waffenschein ab. "
+                    "Nach bestätigter Zahlung wird dir die entsprechende Rolle vergeben."
+                ),
+                color=discord.Color.blue()
+            )
+
+            # Nur der Bewerber wird gepingt – niemals die Behördenrolle.
+            await ticket.send(
+                content=applicant_mention,
+                embed=annahme_embed,
+                view=WaffenscheinPaidView(),
+                allowed_mentions=discord.AllowedMentions(
+                    users=True,
+                    roles=False,
+                    everyone=False,
+                    replied_user=False
                 )
+            )
 
-                # Nur der Bewerber wird gepingt – niemals die Behördenrolle.
-                await ticket.send(
-                    content=applicant_mention,
-                    embed=annahme_embed,
-                    view=WaffenscheinPaidView(),
-                    allowed_mentions=discord.AllowedMentions(
-                        users=True,
-                        roles=False,
-                        everyone=False,
-                        replied_user=False
-                    )
-                )
+            preis = "6000€" if application["license_key"] == "gross" else "3000€"
+            zahlung_embed = discord.Embed(
+                title="💶 Bezahlen",
+                description=(
+                    f"**Bitte bezahle {preis} an SiriusRPManagment.**\n\n"
+                    "***⚠️ Vergesse das Beweisbild/Video nicht! Ohne Beweis = Kein Waffenschein ⚠️***"
+                ),
+                color=discord.Color.red()
+            )
+            await ticket.send(embed=zahlung_embed)
 
-                preis = "6000€" if application["license_key"] == "gross" else "3000€"
-                zahlung_embed = discord.Embed(
-                    title="💶 Bezahlen",
-                    description=(
-                        f"**Bitte bezahle {preis} an SiriusRPManagment.**\n\n"
-                        "***⚠️ Vergesse das Beweisbild/Video nicht! Ohne Beweis = Kein Waffenschein ⚠️***"
-                    ),
-                    color=discord.Color.red()
-                )
-                await ticket.send(embed=zahlung_embed)
+            application["ticket_channel_id"] = ticket.id
+            application["ticket_opened_at"] = time.time()
+            application["status"] = "ticket_open"
+            save_waffenschein_data()
 
-                application["ticket_channel_id"] = ticket.id
-                application["ticket_opened_at"] = time.time()
-                application["status"] = "ticket_open"
-                save_waffenschein_data()
+            button.disabled = True
+            button.label = "Ticket bereits geöffnet"
+            button.emoji = "✅"
+            await interaction.message.edit(view=self)
 
-                button.disabled = True
-                button.label = "Ticket bereits geöffnet"
-                button.emoji = "✅"
-                await interaction.message.edit(view=self)
+            ticket_link = f"https://discord.com/channels/{guild.id}/{ticket.id}"
+            await interaction.response.send_message(
+                "✅ **Das Ticket wurde erfolgreich eröffnet!**\n"
+                f"🎫 [Zum Ticket](<{ticket_link}>)",
+                ephemeral=True
+            )
 
-                ticket_link = f"https://discord.com/channels/{guild.id}/{ticket.id}"
+            await waffenschein_log(
+                application,
+                "TICKET ERÖFFNET",
+                moderator=interaction.user,
+                ticket_channel=ticket,
+                extra=f"Ticket für **{application['lizenz']}** erstellt.",
+                color=discord.Color.blue()
+            )
+
+        except Exception as e:
+            application["status"] = "pending"
+            application["ticket_channel_id"] = None
+            save_waffenschein_data()
+            print(f"❌ Fehler beim Erstellen des Waffenschein-Tickets: {e}")
+
+            if not interaction.response.is_done():
                 await interaction.response.send_message(
-                    "✅ **Das Ticket wurde erfolgreich eröffnet!**\n"
-                    f"🎫 [Zum Ticket](<{ticket_link}>)",
+                    "❌ Beim Erstellen des Tickets ist ein Fehler aufgetreten. Bitte versuche es erneut.",
                     ephemeral=True
                 )
-
-                await waffenschein_log(
-                    application,
-                    "TICKET ERÖFFNET",
-                    moderator=interaction.user,
-                    ticket_channel=ticket,
-                    extra=f"Ticket für **{application['lizenz']}** erstellt.",
-                    color=discord.Color.blue()
+            else:
+                await interaction.followup.send(
+                    "❌ Beim Erstellen des Tickets ist ein Fehler aufgetreten.",
+                    ephemeral=True
                 )
-
-            except Exception as e:
-                application["status"] = "pending"
-                application["ticket_channel_id"] = None
-                save_waffenschein_data()
-                print(f"❌ Fehler beim Erstellen des Waffenschein-Tickets: {e}")
-
-                if not interaction.response.is_done():
-                    await interaction.response.send_message(
-                        "❌ Beim Erstellen des Tickets ist ein Fehler aufgetreten. Bitte versuche es erneut.",
-                        ephemeral=True
-                    )
-                else:
-                    await interaction.followup.send(
-                        "❌ Beim Erstellen des Tickets ist ein Fehler aufgetreten.",
-                        ephemeral=True
-                    )
-            finally:
-                waffenschein_ticket_locks.discard(application_id)
         finally:
-            waffenschein_ticket_creation_lock.release()
+            waffenschein_ticket_locks.discard(application_id)
 
     @ui.button(
         label="Ablehnen",
