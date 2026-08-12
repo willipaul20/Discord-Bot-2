@@ -728,8 +728,14 @@ class WaffenscheinApplicationView(ui.View):
             # Waffenschein-Ticket: erste und zweite Nachricht
             # ------------------------------------------------------
             # 1. Nachricht: Annahme / Zahlungsaufforderung
+            applicant_mention = (
+                applicant.mention
+                if applicant
+                else f"<@{application['user_id']}>"
+            )
+
             annahme_embed = discord.Embed(
-                title=f"🛡️ Waffenschein beantragt von {applicant.mention if applicant else f'<@{application["user_id"]}>'} angenommen.",
+                title=f"🛡️ Waffenschein beantragt von {applicant_mention} angenommen.",
                 description=(
                     "Bitte bezahle jetzt nurnoch den Waffenschein ab und dann "
                     "hast du schon deinen Waffenschein!"
@@ -737,9 +743,21 @@ class WaffenscheinApplicationView(ui.View):
                 color=discord.Color.blue()
             )
 
+            # Bewerber und Behördenrolle werden hier bewusst explizit gepingt.
+            # allowed_mentions stellt sicher, dass Discord die Mentions tatsächlich verarbeitet.
             await ticket.send(
+                content=(
+                    f"<@{application['user_id']}> "
+                    f"<@&{WAFFENSCHEIN_BEARBEITUNG_ROLLE_ID}>"
+                ),
                 embed=annahme_embed,
-                view=WaffenscheinPaidView()
+                view=WaffenscheinPaidView(),
+                allowed_mentions=discord.AllowedMentions(
+                    users=True,
+                    roles=True,
+                    everyone=False,
+                    replied_user=False
+                )
             )
 
             # 2. Nachricht: genaue Zahlungsinformationen
@@ -771,8 +789,10 @@ class WaffenscheinApplicationView(ui.View):
             # Erfolgsnachricht bewusst nicht mehr als Ephemeral senden,
             # damit sie sichtbar ist und der neu erstellte Ticket-Kanal direkt
             # verlinkt wird.
+            ticket_link = f"https://discord.com/channels/{guild.id}/{ticket.id}"
             await interaction.response.send_message(
-                f"✅ Das Ticket wurde erfolgreich geöffnet: {ticket.mention}"
+                f"✅ Das Ticket wurde erfolgreich geöffnet.\n"
+                f"🎫 **Zum Ticket:** {ticket_link}"
             )
 
             await waffenschein_log(
@@ -940,13 +960,29 @@ class WaffenscheinPaidView(ui.View):
         )
 
         if match:
-            application = waffenschein_bewerbungen.get(
-                match.group(1)
-            )
+            application = waffenschein_bewerbungen.get(match.group(1))
+
+        # Fallback: Falls ein älteres Ticket kein korrektes Topic besitzt,
+        # suchen wir die Bewerbung zusätzlich über die gespeicherte Ticket-ID.
+        if not application:
+            channel_id = getattr(interaction.channel, "id", None)
+            for stored_application in waffenschein_bewerbungen.values():
+                if int(stored_application.get("ticket_channel_id") or 0) == int(channel_id or 0):
+                    application = stored_application
+                    break
+
+        # Letzter Fallback: Bewerbungs-ID aus dem Kanalnamen bzw. Topic.
+        if not application:
+            channel_name = getattr(interaction.channel, "name", "") or ""
+            for application_id, stored_application in waffenschein_bewerbungen.items():
+                if str(application_id) in channel_name:
+                    application = stored_application
+                    break
 
         if not application:
             await interaction.response.send_message(
-                "❌ Die Bewerbung konnte nicht gefunden werden.",
+                "❌ Die Bewerbung konnte nicht automatisch über das Ticket zugeordnet werden. "
+                "Bitte prüfe, ob das Ticket mit der aktuellen Bot-Version erstellt wurde.",
                 ephemeral=True
             )
             return
