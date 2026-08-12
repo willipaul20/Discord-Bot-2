@@ -20,6 +20,34 @@ RELOAD_COMMAND_ROLLE_ID = 1527739219907449022
 KLEINER_WAFFENSCHEIN_ROLLE_ID = 1527349817586483220
 GROSSER_WAFFENSCHEIN_ROLLE_ID = 1527349817586483221
 
+# --- WAFFENSCHEIN BEWERBUNGS-SYSTEM ---
+WAFFENSCHEIN_BEARBEITUNGS_ROLLE_ID = 1527349818031214718
+WAFFENSCHEIN_BESTAETIGUNGS_KANAL_ID = 1527616749011337306
+KLEINER_WAFFENSCHEIN_KATEGORIE_ID = 1528372504375332915
+GROSSER_WAFFENSCHEIN_KATEGORIE_ID = 1528371868069789786
+
+WAFFENSCHEIN_PREISE = {
+    "klein": 3000,
+    "gross": 6000,
+}
+
+WAFFENSCHEIN_FRAGEN = {
+    "gross": [
+        "Warum möchtest du einen Großen Waffenschein besitzen?",
+        "Welche Verantwortung trägst du als Besitzer eines großen Waffenscheins?",
+        "In welcher RP-Situation darf eine Langwaffe überhaupt mitgeführt oder eingesetzt werden?",
+        "Was ist der Unterschied zwischen Notwehr und unnötiger Gewalt?",
+        "Was solltest du nach einer Notwehr mit Waffen gebrauch machen?",
+    ],
+    "klein": [
+        "Warum möchtest du einen Kleinen Waffenschein besitzen?",
+        "Wie verhältst du dich wenn ein Polizist deine Waffe findet?",
+        "Darfst du deine Waffe in der Öffentlichkeit nutzen/zeigen um Aufsehen zu kriegen?",
+        "In welcher Situation darfst du deine Waffe nutzen?",
+        "Warum kann dir der Waffenschein wieder entzogen werden?",
+    ],
+}
+
 # --- ROLLEN-KONFIGURATION (TEAMLISTE) ---
 HAUPT_ROLLEN = [
     1527739219907449022,  # ♛ || Discord Inhaber
@@ -76,9 +104,583 @@ async def pruefe_und_kontrolliere(channel, user):
 # WAFFENSCHEIN SYSTEM
 # ==========================================
 
+def waffenschein_typ_name(typ: str) -> str:
+    return "Großer Waffenschein" if typ == "gross" else "Kleiner Waffenschein"
+
+
+def waffenschein_aktive_bewerbung(user_id: int):
+    """Gibt eine aktuell laufende Bewerbung zurück."""
+    for app_id, bewerbung in waffenschein_bewerbungen.items():
+        if int(bewerbung.get("user_id", 0)) != user_id:
+            continue
+        if bewerbung.get("status") in {"in_bewerbung", "offen", "ticket"}:
+            return app_id, bewerbung
+    return None, None
+
+
+def waffenschein_hat_lizenz(member: discord.Member, typ: str) -> bool:
+    role_id = KLEINER_WAFFENSCHEIN_ROLLE_ID if typ == "klein" else GROSSER_WAFFENSCHEIN_ROLLE_ID
+    return has_role(member, role_id)
+
+
+def waffenschein_embed() -> discord.Embed:
+    description = (
+        "Willkommen bei der Behörde für Waffenlizenzen! Du möchtest dich selbst schützen "
+        "oder benötigst eine Waffe für deinen Beruf? Hier kannst du ganz offiziell deinen "
+        "Waffenschein beantragen.\n\n"
+        "Bitte lies dir genau durch, welche Lizenz für dich infrage kommt, bevor du deine Bewerbung abschickst:\n\n"
+        "**🔫 1. Kleiner Waffenschein:**\n"
+        "Diese Lizenz ist für Zivilisten gedacht, die sich im äußersten Notfall selbst verteidigen müssen.\n\n"
+        "- **Erlaubte Waffen:** Leichte Handfeuerwaffen (z. B. Desert Eagle, Glock 17)\n"
+        "- **Voraussetzungen:** Eine weitestgehend saubere Strafakte, geistige Zurechnungsfähigkeit und ein sicheres Auftreten.\n"
+        "- **Zweck:** Reiner Selbstschutz im Alltag.\n\n"
+        "**🧨 2. Großer Waffenschein**\n"
+        "Diese Lizenz ist streng reguliert, deutlich schwerer zu bekommen und oft an spezielle Berufe geknüpft.\n\n"
+        "- **Erlaubte Waffen:** Maschinenpistolen (MP5), Sturmgewehre (M4 Karabiner, G36) und Scharfschützengewehre (Sniper).\n"
+        "- **Voraussetzungen:** Eine absolut saubere Strafakte und ein triftiger Grund (z. B. eingetragener Personenschutz, Security, Werttransport).\n"
+        "- **Zweck:** Professioneller Schutz in Hochrisiko-Situationen."
+    )
+    return discord.Embed(
+        title="🛡️ Waffenschein-Behörde | Lizenz-Antrag",
+        description=description,
+        color=discord.Color.red()
+    )
+
+
+class WaffenscheinAuswahlView(ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @ui.select(
+        placeholder="Wähle die gewünschte Lizenz aus...",
+        custom_id="waffenschein_lizenz_auswahl",
+        options=[
+            discord.SelectOption(
+                label="Großer Waffenschein",
+                value="gross",
+                emoji="🧨",
+                description="Streng regulierte Lizenz für besondere RP-Berufe."
+            ),
+            discord.SelectOption(
+                label="Kleiner Waffenschein",
+                value="klein",
+                emoji="🔫",
+                description="Lizenz für zivilen Selbstschutz."
+            ),
+        ]
+    )
+    async def select_lizenz(self, interaction: discord.Interaction, select: ui.Select):
+        typ = select.values[0]
+        member = interaction.user
+
+        if waffenschein_hat_lizenz(member, typ):
+            await interaction.response.send_message(
+                f"❌ Du besitzt bereits den **{waffenschein_typ_name(typ)}**.",
+                ephemeral=True
+            )
+            return
+
+        aktive_id, aktive = waffenschein_aktive_bewerbung(member.id)
+        if aktive:
+            await interaction.response.send_message(
+                f"⏳ Du hast bereits eine laufende Bewerbung für den **{waffenschein_typ_name(aktive['typ'])}**.\n"
+                "Du kannst erst eine weitere Bewerbung starten, wenn diese **abbezahlt, abgelehnt oder abgebrochen** wurde.",
+                ephemeral=True
+            )
+            return
+
+        await interaction.response.send_message(
+            embed=discord.Embed(
+                title=f"{waffenschein_typ_name(typ)} beantragen?",
+                description=(
+                    f"Möchtest du die Bewerbung für den **{waffenschein_typ_name(typ)}** wirklich starten?\n\n"
+                    "Wenn du auf **Bewerbung starten** klickst, werden dir die Fragen "
+                    "nacheinander gestellt. Erst nach deiner Antwort geht es mit der nächsten Frage weiter."
+                ),
+                color=discord.Color.red()
+            ),
+            view=WaffenscheinStartView(typ),
+            ephemeral=True
+        )
+
+
+class WaffenscheinStartView(ui.View):
+    def __init__(self, typ: str):
+        super().__init__(timeout=120)
+        self.typ = typ
+
+    @ui.button(label="Bewerbung starten", style=discord.ButtonStyle.success, emoji="▶️")
+    async def start(self, interaction: discord.Interaction, button: ui.Button):
+        aktive_id, aktive = waffenschein_aktive_bewerbung(interaction.user.id)
+        if aktive:
+            await interaction.response.send_message(
+                f"❌ Du hast bereits eine laufende Bewerbung für den **{waffenschein_typ_name(aktive['typ'])}**.",
+                ephemeral=True
+            )
+            return
+
+        if waffenschein_hat_lizenz(interaction.user, self.typ):
+            await interaction.response.send_message(
+                f"❌ Du besitzt bereits den **{waffenschein_typ_name(self.typ)}**.",
+                ephemeral=True
+            )
+            return
+
+        app_id = str(f"{interaction.user.id}-{int(time.time() * 1000)}")
+        waffenschein_bewerbungen[app_id] = {
+            "user_id": interaction.user.id,
+            "guild_id": interaction.guild.id,
+            "typ": self.typ,
+            "status": "in_bewerbung",
+            "answers": [],
+            "created_at": time.time(),
+            "log_message_id": None,
+            "ticket_channel_id": None,
+        }
+        save_data()
+
+        await interaction.response.send_modal(
+            WaffenscheinFrageModal(app_id=app_id, frage_index=0)
+        )
+
+
+class WaffenscheinFrageModal(ui.Modal):
+    def __init__(self, app_id: str, frage_index: int):
+        bewerbung = waffenschein_bewerbungen.get(app_id)
+        typ = bewerbung.get("typ", "klein") if bewerbung else "klein"
+        fragen = WAFFENSCHEIN_FRAGEN[typ]
+        frage = fragen[frage_index]
+
+        super().__init__(
+            title=f"{waffenschein_typ_name(typ)} • Frage {frage_index + 1}/{len(fragen)}"
+        )
+        self.app_id = app_id
+        self.frage_index = frage_index
+
+        self.antwort = ui.TextInput(
+            label=f"Frage {frage_index + 1}",
+            style=discord.TextStyle.paragraph,
+            placeholder=frage[:100],
+            required=True,
+            max_length=1500
+        )
+        self.add_item(self.antwort)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        bewerbung = waffenschein_bewerbungen.get(self.app_id)
+        if not bewerbung or bewerbung.get("user_id") != interaction.user.id:
+            await interaction.response.send_message(
+                "❌ Diese Bewerbung existiert nicht mehr oder gehört nicht dir.",
+                ephemeral=True
+            )
+            return
+
+        if bewerbung.get("status") != "in_bewerbung":
+            await interaction.response.send_message(
+                "❌ Diese Bewerbung ist nicht mehr aktiv.",
+                ephemeral=True
+            )
+            return
+
+        bewerbung["answers"].append({
+            "question": WAFFENSCHEIN_FRAGEN[bewerbung["typ"]][self.frage_index],
+            "answer": self.antwort.value.strip(),
+        })
+
+        fragen = WAFFENSCHEIN_FRAGEN[bewerbung["typ"]]
+        if self.frage_index < len(fragen) - 1:
+            save_data()
+            await interaction.response.send_modal(
+                WaffenscheinFrageModal(
+                    app_id=self.app_id,
+                    frage_index=self.frage_index + 1
+                )
+            )
+            return
+
+        bewerbung["status"] = "offen"
+        bewerbung["completed_at"] = time.time()
+        save_data()
+
+        await interaction.response.send_message(
+            "✅ Deine Bewerbung wurde vollständig aufgenommen und an die Waffenschein-Behörde weitergeleitet.",
+            ephemeral=True
+        )
+
+        await waffenschein_bewerbung_abschicken(interaction.guild, self.app_id)
+
+
+async def waffenschein_bewerbung_abschicken(guild: discord.Guild, app_id: str):
+    bewerbung = waffenschein_bewerbungen.get(app_id)
+    if not bewerbung:
+        return
+
+    kanal = guild.get_channel(WAFFENSCHEIN_BESTAETIGUNGS_KANAL_ID)
+    if not kanal:
+        print(f"❌ Waffenschein-Bewerbungskanal {WAFFENSCHEIN_BESTAETIGUNGS_KANAL_ID} wurde nicht gefunden.")
+        return
+
+    member = guild.get_member(int(bewerbung["user_id"]))
+    if not member:
+        try:
+            member = await guild.fetch_member(int(bewerbung["user_id"]))
+        except (discord.NotFound, discord.HTTPException):
+            member = None
+
+    user_text = member.mention if member else f"<@{bewerbung['user_id']}"
+    typ_name = waffenschein_typ_name(bewerbung["typ"])
+
+    embed = discord.Embed(
+        title=f"🛡️ Neue {typ_name}-Bewerbung",
+        description=f"**Bewerber:** {user_text}\n**Lizenz:** {typ_name}",
+        color=discord.Color.red(),
+        timestamp=discord.utils.utcnow()
+    )
+
+    for index, qa in enumerate(bewerbung["answers"], start=1):
+        frage = qa["question"]
+        antwort = qa["answer"]
+        if len(antwort) > 1024:
+            antwort = antwort[:1021] + "..."
+        embed.add_field(
+            name=f"{index}. {frage}",
+            value=antwort,
+            inline=False
+        )
+
+    embed.add_field(
+        name="📅 Bewerbung eingereicht",
+        value=f"<t:{int(bewerbung.get('completed_at', time.time()))}:F>",
+        inline=False
+    )
+    embed.set_footer(text=f"Bewerbungs-ID: {app_id}")
+
+    view = WaffenscheinTicketView(app_id)
+    msg = await kanal.send(
+        content=f"<@&{WAFFENSCHEIN_BEARBEITUNGS_ROLLE_ID}>",
+        embed=embed,
+        view=view
+    )
+
+    bewerbung["log_message_id"] = msg.id
+    save_data()
+
+
+class WaffenscheinTicketView(ui.View):
+    def __init__(self, app_id: str):
+        super().__init__(timeout=None)
+        self.app_id = app_id
+
+    @ui.button(
+        label="Ticket Öffnen",
+        style=discord.ButtonStyle.primary,
+        emoji="🎫"
+    )
+    async def open_ticket(self, interaction: discord.Interaction, button: ui.Button):
+        bewerbung = waffenschein_bewerbungen.get(self.app_id)
+        if not bewerbung:
+            await interaction.response.send_message(
+                "❌ Die Bewerbung wurde nicht gefunden.",
+                ephemeral=True
+            )
+            return
+
+        if interaction.user.id != int(bewerbung["user_id"]) and not has_role(
+            interaction.user, WAFFENSCHEIN_BEARBEITUNGS_ROLLE_ID
+        ):
+            await interaction.response.send_message(
+                "❌ Nur der Bewerber oder die zuständige Behörde kann das Ticket öffnen.",
+                ephemeral=True
+            )
+            return
+
+        if bewerbung.get("ticket_channel_id"):
+            existing = interaction.guild.get_channel(int(bewerbung["ticket_channel_id"]))
+            if existing:
+                button.disabled = True
+                button.label = "Ticket bereits geöffnet"
+                await interaction.message.edit(view=self)
+                await interaction.response.send_message(
+                    f"❌ Das Ticket wurde bereits geöffnet: {existing.mention}",
+                    ephemeral=True
+                )
+                return
+
+        if bewerbung.get("status") not in {"offen", "ticket"}:
+            await interaction.response.send_message(
+                "❌ Diese Bewerbung kann aktuell kein Ticket mehr eröffnen.",
+                ephemeral=True
+            )
+            return
+
+        category_id = (
+            GROSSER_WAFFENSCHEIN_KATEGORIE_ID
+            if bewerbung["typ"] == "gross"
+            else KLEINER_WAFFENSCHEIN_KATEGORIE_ID
+        )
+        category = interaction.guild.get_channel(category_id)
+        if not isinstance(category, discord.CategoryChannel):
+            await interaction.response.send_message(
+                "❌ Die konfigurierte Ticket-Kategorie wurde nicht gefunden.",
+                ephemeral=True
+            )
+            return
+
+        applicant = interaction.guild.get_member(int(bewerbung["user_id"]))
+        if not applicant:
+            try:
+                applicant = await interaction.guild.fetch_member(int(bewerbung["user_id"]))
+            except (discord.NotFound, discord.HTTPException):
+                await interaction.response.send_message(
+                    "❌ Der Bewerber konnte auf dem Server nicht gefunden werden.",
+                    ephemeral=True
+                )
+                return
+
+        team_role = interaction.guild.get_role(WAFFENSCHEIN_BEARBEITUNGS_ROLLE_ID)
+        overwrites = {
+            interaction.guild.default_role: discord.PermissionOverwrite(view_channel=False),
+            applicant: discord.PermissionOverwrite(
+                view_channel=True,
+                send_messages=True,
+                read_message_history=True,
+                attach_files=True,
+                embed_links=True
+            ),
+            interaction.guild.me: discord.PermissionOverwrite(
+                view_channel=True,
+                send_messages=True,
+                read_message_history=True,
+                manage_channels=True,
+                manage_messages=True
+            ),
+        }
+        if team_role:
+            overwrites[team_role] = discord.PermissionOverwrite(
+                view_channel=True,
+                send_messages=True,
+                read_message_history=True,
+                manage_messages=True
+            )
+
+        safe_name = re.sub(r"[^a-z0-9-]", "-", applicant.display_name.lower()).strip("-")
+        safe_name = safe_name[:35] or "bewerber"
+        channel_name = f"waffenschein-{bewerbung['typ']}-{safe_name}"
+
+        try:
+            ticket = await category.create_text_channel(
+                name=channel_name,
+                overwrites=overwrites,
+                reason=f"Waffenschein-Ticket für {applicant} ({self.app_id})"
+            )
+        except discord.Forbidden:
+            await interaction.response.send_message(
+                "❌ Ich habe keine Berechtigung, in dieser Kategorie ein Ticket zu erstellen.",
+                ephemeral=True
+            )
+            return
+
+        bewerbung["ticket_channel_id"] = ticket.id
+        bewerbung["status"] = "ticket"
+        bewerbung["ticket_opened_at"] = time.time()
+        save_data()
+
+        button.disabled = True
+        button.label = "Ticket bereits geöffnet"
+        await interaction.message.edit(view=self)
+
+        ticket_embed = discord.Embed(
+            title=f"Waffenschein beantragt von {applicant.display_name} angenommen.",
+            description=(
+                "Bitte bezahle jetzt nurnoch den Waffenschein ab und dann hast du schon deinen Waffenschein!"
+            ),
+            color=discord.Color.blue()
+        )
+        ticket_embed.add_field(name="👤 Antragsteller", value=applicant.mention, inline=False)
+        ticket_embed.add_field(
+            name="🔫 Lizenz",
+            value=waffenschein_typ_name(bewerbung["typ"]),
+            inline=False
+        )
+
+        payment_embed = discord.Embed(
+            title="Bezahlen",
+            description=(
+                f"__Bitte bezahle **{WAFFENSCHEIN_PREISE[bewerbung['typ']]}€** "
+                "an **SiriusRPManagment**.__\n\n"
+                "***⚠️Vergesse das Beweisbild/Video nicht! Ohne Beweis = Kein Waffenschein⚠️***"
+            ),
+            color=discord.Color.red()
+        )
+
+        await ticket.send(
+            content=applicant.mention,
+            embed=ticket_embed,
+            view=WaffenscheinZahlungsView(self.app_id)
+        )
+        await ticket.send(embed=payment_embed)
+
+        await interaction.response.send_message(
+            f"✅ Ticket wurde erstellt: {ticket.mention}",
+            ephemeral=True
+        )
+
+
+class WaffenscheinZahlungsView(ui.View):
+    def __init__(self, app_id: str):
+        super().__init__(timeout=None)
+        self.app_id = app_id
+
+    @ui.button(
+        label="Waffenschein Abbezahlt",
+        style=discord.ButtonStyle.success,
+        emoji="💰"
+    )
+    async def paid(self, interaction: discord.Interaction, button: ui.Button):
+        if not has_role(interaction.user, WAFFENSCHEIN_BEARBEITUNGS_ROLLE_ID):
+            await interaction.response.send_message(
+                "❌ Nur die zuständige Waffenschein-Behörde darf diesen Button benutzen.",
+                ephemeral=True
+            )
+            return
+
+        bewerbung = waffenschein_bewerbungen.get(self.app_id)
+        if not bewerbung:
+            await interaction.response.send_message(
+                "❌ Die Bewerbung wurde nicht gefunden.",
+                ephemeral=True
+            )
+            return
+
+        if bewerbung.get("status") == "bezahlt":
+            await interaction.response.send_message(
+                "⚠️ Dieser Waffenschein wurde bereits als bezahlt markiert.",
+                ephemeral=True
+            )
+            return
+
+        if bewerbung.get("status") != "ticket":
+            await interaction.response.send_message(
+                "❌ Diese Bewerbung befindet sich nicht mehr im Zahlungsstatus.",
+                ephemeral=True
+            )
+            return
+
+        member = interaction.guild.get_member(int(bewerbung["user_id"]))
+        if not member:
+            try:
+                member = await interaction.guild.fetch_member(int(bewerbung["user_id"]))
+            except (discord.NotFound, discord.HTTPException):
+                await interaction.response.send_message(
+                    "❌ Der Antragsteller konnte nicht gefunden werden.",
+                    ephemeral=True
+                )
+                return
+
+        role_id = (
+            GROSSER_WAFFENSCHEIN_ROLLE_ID
+            if bewerbung["typ"] == "gross"
+            else KLEINER_WAFFENSCHEIN_ROLLE_ID
+        )
+        role = interaction.guild.get_role(role_id)
+        if not role:
+            await interaction.response.send_message(
+                "❌ Die Waffenschein-Rolle wurde nicht gefunden.",
+                ephemeral=True
+            )
+            return
+
+        try:
+            await member.add_roles(
+                role,
+                reason=f"Waffenschein bezahlt – Bewerbung {self.app_id}"
+            )
+        except discord.Forbidden:
+            await interaction.response.send_message(
+                "❌ Ich kann die Waffenschein-Rolle nicht vergeben. Prüfe die Rollen-Hierarchie.",
+                ephemeral=True
+            )
+            return
+
+        bewerbung["status"] = "bezahlt"
+        bewerbung["paid_at"] = time.time()
+        bewerbung["paid_by"] = interaction.user.id
+        save_data()
+
+        button.disabled = True
+        button.label = "Waffenschein Abbezahlt ✓"
+        await interaction.message.edit(view=self)
+
+        paid_embed = discord.Embed(
+            title="✅ Waffenschein erfolgreich abbezahlt",
+            description=(
+                f"{member.mention} hat den **{waffenschein_typ_name(bewerbung['typ'])}** "
+                "erfolgreich erhalten."
+            ),
+            color=discord.Color.green()
+        )
+        paid_embed.add_field(name="🛡️ Bearbeitet von", value=interaction.user.mention, inline=False)
+        await interaction.channel.send(embed=paid_embed)
+
+        await interaction.response.send_message(
+            f"✅ {member.mention} hat die Rolle **{role.name}** erhalten.",
+            ephemeral=True
+        )
+
+
+class WaffenscheinTeamStatusView(ui.View):
+    """Team-Buttons zum Ablehnen oder Abbrechen einer Bewerbung."""
+
+    def __init__(self, app_id: str):
+        super().__init__(timeout=None)
+        self.app_id = app_id
+
+    @ui.button(label="Bewerbung ablehnen", style=discord.ButtonStyle.danger, emoji="❌")
+    async def reject(self, interaction: discord.Interaction, button: ui.Button):
+        if not has_role(interaction.user, WAFFENSCHEIN_BEARBEITUNGS_ROLLE_ID):
+            await interaction.response.send_message("❌ Keine Berechtigung.", ephemeral=True)
+            return
+
+        bewerbung = waffenschein_bewerbungen.get(self.app_id)
+        if not bewerbung or bewerbung.get("status") not in {"offen", "ticket"}:
+            await interaction.response.send_message("❌ Diese Bewerbung kann nicht mehr abgelehnt werden.", ephemeral=True)
+            return
+
+        bewerbung["status"] = "abgelehnt"
+        bewerbung["rejected_at"] = time.time()
+        bewerbung["rejected_by"] = interaction.user.id
+        save_data()
+
+        await interaction.response.send_message("✅ Die Bewerbung wurde abgelehnt.", ephemeral=True)
+
+    @ui.button(label="Bewerbung abbrechen", style=discord.ButtonStyle.secondary, emoji="🛑")
+    async def cancel(self, interaction: discord.Interaction, button: ui.Button):
+        if not has_role(interaction.user, WAFFENSCHEIN_BEARBEITUNGS_ROLLE_ID):
+            await interaction.response.send_message("❌ Keine Berechtigung.", ephemeral=True)
+            return
+
+        bewerbung = waffenschein_bewerbungen.get(self.app_id)
+        if not bewerbung or bewerbung.get("status") not in {"offen", "ticket"}:
+            await interaction.response.send_message("❌ Diese Bewerbung kann nicht mehr abgebrochen werden.", ephemeral=True)
+            return
+
+        bewerbung["status"] = "abgebrochen"
+        bewerbung["cancelled_at"] = time.time()
+        bewerbung["cancelled_by"] = interaction.user.id
+        save_data()
+
+        await interaction.response.send_message("✅ Die Bewerbung wurde abgebrochen.", ephemeral=True)
+
+
+# Kompatibilität mit dem bisherigen Status-Panel:
 class WaffenscheinSelect(ui.UserSelect):
     def __init__(self):
-        super().__init__(placeholder="Wähle einen Nutzer aus...", min_values=1, max_values=1, custom_id="waffenschein_user_select")
+        super().__init__(
+            placeholder="Wähle einen Nutzer aus...",
+            min_values=1,
+            max_values=1,
+            custom_id="waffenschein_user_select"
+        )
 
     async def callback(self, interaction: discord.Interaction):
         member = interaction.guild.get_member(self.values[0].id)
@@ -86,15 +688,18 @@ class WaffenscheinSelect(ui.UserSelect):
             await interaction.response.send_message("❌ Nutzer nicht gefunden.", ephemeral=True)
             return
 
-        has_klein = any(r.id == KLEINER_WAFFENSCHEIN_ROLLE_ID for r in member.roles)
-        has_gross = any(r.id == GROSSER_WAFFENSCHEIN_ROLLE_ID for r in member.roles)
+        has_klein = waffenschein_hat_lizenz(member, "klein")
+        has_gross = waffenschein_hat_lizenz(member, "gross")
+        aktive_id, aktive = waffenschein_aktive_bewerbung(member.id)
 
-        status = []
-        if has_klein: status.append("✅ Kleiner Waffenschein")
-        else: status.append("❌ Kleiner Waffenschein")
-        
-        if has_gross: status.append("✅ Großer Waffenschein")
-        else: status.append("❌ Großer Waffenschein")
+        status = [
+            f"{'✅' if has_klein else '❌'} Kleiner Waffenschein",
+            f"{'✅' if has_gross else '❌'} Großer Waffenschein",
+        ]
+        if aktive:
+            status.append(
+                f"⏳ Laufende Bewerbung: {waffenschein_typ_name(aktive['typ'])}"
+            )
 
         embed = discord.Embed(
             title=f"Waffenschein-Status: {member.display_name}",
@@ -103,10 +708,12 @@ class WaffenscheinSelect(ui.UserSelect):
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
+
 class WaffenscheinView(ui.View):
     def __init__(self):
         super().__init__(timeout=None)
-        self.add_item(WaffenscheinSelect())
+        self.add_item(WaffenscheinAuswahlView().children[0])
+
 
 # ==========================================
 # HELPER FUNCTIONS & TEAMLISTE LOGIK
@@ -408,15 +1015,19 @@ def load_data():
                 try: loaded_xp_locks[int(k)] = float(v)
                 except (TypeError, ValueError): pass
             loaded_boost = data.get("active_xp_boost") if isinstance(data.get("active_xp_boost"), dict) else None
+            loaded_waffenschein = {
+                str(k): v for k, v in data.get("waffenschein_bewerbungen", {}).items()
+                if isinstance(v, dict)
+            }
             loaded_dizzy_messages = {}
             for k, v in data.get("dizzy_last_message", {}).items():
                 if isinstance(v, dict):
                     try: loaded_dizzy_messages[int(k)] = {"message_id": int(v.get("message_id", 0)), "timestamp": float(v.get("timestamp", 0))}
                     except (TypeError, ValueError): pass
-            return loaded_xp, loaded_mod, data.get("active_ban_bolos", []), loaded_dizzy, legacy_dizzy, data.get("time_leaderboard", []), loaded_feedbacks, loaded_xp_locks, loaded_boost, loaded_dizzy_messages
+            return loaded_xp, loaded_mod, data.get("active_ban_bolos", []), loaded_dizzy, legacy_dizzy, data.get("time_leaderboard", []), loaded_feedbacks, loaded_xp_locks, loaded_boost, loaded_dizzy_messages, loaded_waffenschein
         except Exception as e:
             print(f"Fehler beim Laden der Datenbank: {e}")
-    return {}, {}, [], [], set(), [], {}, {}, None, {}
+    return {}, {}, [], [], set(), [], {}, {}, None, {}, {}
 
 def save_data():
     data = {
@@ -429,7 +1040,8 @@ def save_data():
         "time_leaderboard": time_leaderboard,
         "team_feedbacks": team_feedbacks,
         "xp_locks": {str(uid): end for uid, end in xp_locks.items()},
-        "active_xp_boost": active_xp_boost
+        "active_xp_boost": active_xp_boost,
+        "waffenschein_bewerbungen": waffenschein_bewerbungen
     }
     temp_file=f"{DATA_FILE}.tmp"
     try:
@@ -442,7 +1054,7 @@ def save_data():
             if os.path.exists(temp_file): os.remove(temp_file)
         except OSError: pass
 
-(user_xp, moderation_eintraege, active_ban_bolos, durchgefuehrte_kontrollen, legacy_dizzy_kontrollen, time_leaderboard, team_feedbacks, xp_locks, active_xp_boost, dizzy_last_message) = load_data()
+(user_xp, moderation_eintraege, active_ban_bolos, durchgefuehrte_kontrollen, legacy_dizzy_kontrollen, time_leaderboard, team_feedbacks, xp_locks, active_xp_boost, dizzy_last_message, waffenschein_bewerbungen) = load_data()
 
 text_cooldowns = {}
 fullmute_timers = {}
@@ -1779,7 +2391,18 @@ async def on_ready():
     bot.add_view(TimeLeaderboardView())
     bot.add_view(VerifyView())
     bot.add_view(StartBewerbungView())
+    bot.add_view(WaffenscheinAuswahlView())
     bot.add_view(WaffenscheinView())
+
+    # Persistente Waffenschein-Views nach einem Neustart wiederherstellen.
+    for app_id, bewerbung in list(waffenschein_bewerbungen.items()):
+        try:
+            if bewerbung.get("status") in {"offen", "ticket"}:
+                bot.add_view(WaffenscheinTicketView(app_id))
+            if bewerbung.get("status") == "ticket":
+                bot.add_view(WaffenscheinZahlungsView(app_id))
+        except Exception as e:
+            print(f"⚠️ Waffenschein-View konnte nicht wiederhergestellt werden ({app_id}): {e}")
 
     try:
         synced = await bot.tree.sync()
@@ -1828,26 +2451,16 @@ async def on_message(message: discord.Message):
 
 @bot.command()
 async def setupwaffenschein(ctx):
-    if not any(r.id == RELOAD_COMMAND_ROLLE_ID for r in ctx.author.roles) and not ctx.author.guild_permissions.administrator:
-        await ctx.send("❌ Du hast keine Berechtigung dafür.", ephemeral=True)
+    if (
+        not has_role(ctx.author, WAFFENSCHEIN_BEARBEITUNGS_ROLLE_ID)
+        and not ctx.author.guild_permissions.administrator
+    ):
+        await ctx.send("❌ Du hast keine Berechtigung dafür.")
         return
 
-    embed = discord.Embed(
-        title="🛡️ Waffenschein überprüfen",
-        description=(
-            "Hier kannst du überprüfen ob eine Person einen Waffenschein hat.\n\n"
-            "— — — — — — — — —\n\n"
-            "Klicke nur unten auf den Button, wähle einen Nutzer aus und sehe ob diese Person einen Waffenschein hat!\n\n"
-            "— — — — — — — — —\n\n"
-            "**Großer Waffenschein:** Maschinenpistolen (MP5), Sturmgewehre (M4 Karabiner, G36) und Scharfschützengewehre (Sniper).\n"
-            "**Kleiner Waffenschein:** Leichte Handfeuerwaffen (z. B. Desert Eagle, Glock 17)\n\n"
-            "— — — — — — — — —\n\n"
-            "Du kannst dich hier für einen Waffenschein bewerben: https://discord.com/channels/1527349817443877016/1527616653611896833"
-        ),
-        color=discord.Color.dark_grey()
-    )
-    
-    await ctx.send(embed=embed, view=WaffenscheinView())
+    embed = waffenschein_embed()
+    await ctx.send(embed=embed, view=WaffenscheinAuswahlView())
+
     try:
         await ctx.message.delete()
     except Exception:
