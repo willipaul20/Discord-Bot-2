@@ -156,17 +156,80 @@ waffenschein_bewerbungen = load_waffenschein_data()
 
 
 def waffenschein_get_application_from_embed(message: discord.Message):
+    """Findet die Bewerbung zuverlässig über Embed-Text, Felder oder Buttons."""
     if not message.embeds:
         return None
 
     embed = message.embeds[0]
+
+    # 1. ID aus der Description suchen.
     description = embed.description or ""
+    match = re.search(
+        r"Bewerbungs-ID\s*:\s*`([^`]+)`",
+        description,
+        re.IGNORECASE
+    )
 
-    match = re.search(r"Bewerbungs-ID:\s*`([^`]+)`", description)
-    if not match:
-        return None
+    if match:
+        application = waffenschein_bewerbungen.get(match.group(1))
+        if application:
+            return application
 
-    return waffenschein_bewerbungen.get(match.group(1))
+    # 2. ID aus den Embed-Feldern suchen.
+    for field in embed.fields:
+        combined = f"{field.name}\n{field.value}"
+        match = re.search(
+            r"Bewerbungs-ID\s*:\s*`([^`]+)`",
+            combined,
+            re.IGNORECASE
+        )
+        if match:
+            application = waffenschein_bewerbungen.get(match.group(1))
+            if application:
+                return application
+
+        # Falls nur der Feldwert die ID enthält.
+        match = re.fullmatch(r"`([^`]+)`", str(field.value).strip())
+        if match and field.name.strip().lower() in {
+            "bewerbungs-id",
+            "bewerbung-id",
+            "application-id"
+        }:
+            application = waffenschein_bewerbungen.get(match.group(1))
+            if application:
+                return application
+
+    # 3. Fallback: alle sichtbaren Embed-Texte nach einer bekannten ID
+    #    durchsuchen. Das macht die Buttons robust gegen kleine
+    #    Änderungen an der Embed-Darstellung.
+    visible_text = " ".join([
+        description,
+        str(embed.title or ""),
+        *[
+            f"{field.name} {field.value}"
+            for field in embed.fields
+        ]
+    ])
+
+    for application_id, application in waffenschein_bewerbungen.items():
+        if application_id in visible_text:
+            return application
+
+    return None
+
+
+def waffenschein_user_has_license_role(member):
+    """Prüft, ob der Benutzer bereits einen kleinen oder großen Waffenschein besitzt."""
+    if member is None:
+        return False
+
+    return any(
+        role.id in {
+            KLEINER_WAFFENSCHEIN_ROLLE_ID,
+            GROSSER_WAFFENSCHEIN_ROLLE_ID
+        }
+        for role in member.roles
+    )
 
 
 def waffenschein_user_has_active_application(user_id: int):
@@ -284,10 +347,15 @@ async def waffenschein_finish_application(user: discord.User, application: dict)
             f"**Benutzername:** `{application['username']}`\n"
             f"**Lizenz:** **{application['lizenz']}**\n"
             f"**Bewerbung abgeschickt:** <t:{timestamp}:F>\n"
-            f"**Bewerbungs-ID:** `{application['id']}`\n"
             f"**Status:** 🟡 Offen"
         ),
         color=discord.Color.red()
+    )
+
+    embed.add_field(
+        name="Bewerbungs-ID",
+        value=f"`{application['id']}`",
+        inline=False
     )
 
     for index, (question, answer) in enumerate(
@@ -343,6 +411,17 @@ class WaffenscheinSelect(ui.Select):
     async def callback(self, interaction: discord.Interaction):
         license_key = self.values[0]
 
+        # Wer bereits einen kleinen oder großen Waffenschein besitzt,
+        # darf keine weitere Bewerbung starten.
+        if waffenschein_user_has_license_role(interaction.user):
+            await interaction.response.send_message(
+                "❌ Du besitzt bereits einen Waffenschein. "
+                "Solange du den Kleinen oder Großen Waffenschein besitzt, "
+                "kannst du keine neue Bewerbung starten.",
+                ephemeral=True
+            )
+            return
+
         active = waffenschein_user_has_active_application(interaction.user.id)
         if active:
             await interaction.response.send_message(
@@ -389,6 +468,15 @@ class WaffenscheinStartView(ui.View):
         interaction: discord.Interaction,
         button: ui.Button
     ):
+        # Erneute Prüfung direkt vor dem Start.
+        if waffenschein_user_has_license_role(interaction.user):
+            await interaction.response.send_message(
+                "❌ Du besitzt bereits einen Waffenschein. "
+                "Eine neue Bewerbung ist deshalb nicht möglich.",
+                ephemeral=True
+            )
+            return
+
         active = waffenschein_user_has_active_application(interaction.user.id)
 
         if active:
@@ -501,6 +589,23 @@ class WaffenscheinApplicationView(ui.View):
             return
 
         application_id = application["id"]
+
+        # Auch beim Öffnen des Tickets prüfen wir den aktuellen Status
+        # des Bewerbers, damit alte Bewerbungs-Embeds nicht ungewollt
+        # weiterverwendet werden können.
+        try:
+            current_applicant = interaction.guild.get_member(
+                int(application["user_id"])
+            )
+            if current_applicant and waffenschein_user_has_license_role(current_applicant):
+                await interaction.response.send_message(
+                    "❌ Der Bewerber besitzt bereits einen Waffenschein. "
+                    "Das Ticket kann nicht mehr geöffnet werden.",
+                    ephemeral=True
+                )
+                return
+        except Exception:
+            pass
 
         if application.get("status") == "rejected":
             await interaction.response.send_message(
