@@ -724,6 +724,37 @@ class WaffenscheinApplicationView(ui.View):
                 )
             )
 
+            # ------------------------------------------------------
+            # Waffenschein-Ticket: erste und zweite Nachricht
+            # ------------------------------------------------------
+            # 1. Nachricht: Annahme / Zahlungsaufforderung
+            annahme_embed = discord.Embed(
+                title=f"🛡️ Waffenschein beantragt von {applicant.mention if applicant else f'<@{application["user_id"]}>'} angenommen.",
+                description=(
+                    "Bitte bezahle jetzt nurnoch den Waffenschein ab und dann "
+                    "hast du schon deinen Waffenschein!"
+                ),
+                color=discord.Color.blue()
+            )
+
+            await ticket.send(
+                embed=annahme_embed,
+                view=WaffenscheinPaidView()
+            )
+
+            # 2. Nachricht: genaue Zahlungsinformationen
+            preis = "6000€" if application["license_key"] == "gross" else "3000€"
+            zahlung_embed = discord.Embed(
+                title="💶 Bezahlen",
+                description=(
+                    f"**Bitte bezahle {preis} an SiriusRPManagment.**\n\n"
+                    "***⚠️ Vergesse das Beweisbidl/Video nicht! Ohne Beweis = Kein Waffenschein⚠️***"
+                ),
+                color=discord.Color.red()
+            )
+
+            await ticket.send(embed=zahlung_embed)
+
             application["ticket_channel_id"] = ticket.id
             application["ticket_opened_at"] = time.time()
             application["status"] = "ticket_open"
