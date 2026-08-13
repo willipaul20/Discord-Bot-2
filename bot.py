@@ -828,6 +828,8 @@ class WaffenscheinSelect(ui.Select):
         )
 
     async def callback(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+
         license_key = self.values[0]
 
         # Nur derselbe Waffenschein darf nicht erneut beantragt werden.
@@ -842,7 +844,7 @@ class WaffenscheinSelect(ui.Select):
                 if license_key == "gross"
                 else "Kleinen Waffenschein"
             )
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 f"❌ Du besitzt bereits den **{vorhandener}**. "
                 "Diesen kannst du nicht erneut beantragen. "
                 "Den jeweils anderen Waffenschein kannst du weiterhin beantragen.",
@@ -852,7 +854,7 @@ class WaffenscheinSelect(ui.Select):
 
         active = waffenschein_user_has_active_application(interaction.user.id)
         if active:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ Du hast bereits eine aktive Waffenschein-Bewerbung. "
                 "Du kannst erst wieder eine neue Bewerbung starten, wenn die aktuelle "
                 "Bewerbung abgeschlossen, abgelehnt oder abgebrochen wurde.",
@@ -866,7 +868,7 @@ class WaffenscheinSelect(ui.Select):
             else "Kleiner Waffenschein"
         )
 
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"Du hast **{lizenz}** ausgewählt.\n\n"
             "Möchtest du die Bewerbung wirklich starten?\n"
             "Die Fragen werden dir anschließend **privat per DM** gestellt.",
@@ -1698,7 +1700,7 @@ class WaffenscheinPaidView(ui.View):
 
         ticket_channel = interaction.channel
 
-        application["status"] = "paid"
+        application["status"] = "completed"
         application["paid_at"] = time.time()
         application["paid_by"] = interaction.user.id
         application["paid_role_id"] = role.id
