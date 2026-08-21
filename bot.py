@@ -140,7 +140,6 @@ def save_waffenschein_data():
                 indent=4
             )
             f.flush()
-            os.fsync(f.fileno())
 
         os.replace(temp_file, WAFFENSCHEIN_DATA_FILE)
     except Exception as e:
@@ -373,7 +372,6 @@ def waffenschein_repair_stale_paid_status(application: dict):
         application.pop("paid_by", None)
         application.pop("paid_role_id", None)
         application.pop("ticket_closed_at", None)
-        save_waffenschein_data()
         return True
     return False
 
@@ -898,6 +896,9 @@ class WaffenscheinStartView(ui.View):
         interaction: discord.Interaction,
         button: ui.Button
     ):
+        # Discord verlangt eine Interaktionsbestätigung innerhalb weniger Sekunden.
+        await interaction.response.defer(ephemeral=True)
+
         # Erneute Prüfung direkt vor dem Start:
         # Nur derselbe Waffenschein blockiert die Bewerbung.
         if waffenschein_user_has_specific_license(
@@ -909,7 +910,7 @@ class WaffenscheinStartView(ui.View):
                 if self.license_key == "gross"
                 else "Kleinen Waffenschein"
             )
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 f"❌ Du besitzt bereits den **{vorhandener}**. "
                 "Diesen kannst du nicht erneut beantragen.",
                 ephemeral=True
@@ -919,7 +920,7 @@ class WaffenscheinStartView(ui.View):
         active = waffenschein_user_has_active_application(interaction.user.id)
 
         if active:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ Du hast bereits eine aktive Bewerbung.",
                 ephemeral=True
             )
@@ -978,14 +979,14 @@ class WaffenscheinStartView(ui.View):
             waffenschein_bewerbungen.pop(application_id, None)
             save_waffenschein_data()
 
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ Ich konnte dir keine DM schicken. "
                 "Bitte aktiviere deine Direktnachrichten für diesen Server und versuche es erneut.",
                 ephemeral=True
             )
             return
 
-        await interaction.response.send_message(
+        await interaction.followup.send(
             "✅ Die Bewerbung wurde gestartet. Ich habe dir die erste Frage per DM geschickt.",
             ephemeral=True
         )
@@ -1354,11 +1355,13 @@ class WaffenscheinApplicationView(ui.View):
         interaction: discord.Interaction,
         button: ui.Button
     ):
+        await interaction.response.defer(ephemeral=True)
+
         if not has_role(
             interaction.user,
             WAFFENSCHEIN_BEARBEITUNG_ROLLE_ID
         ):
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ Nur Mitglieder der Waffenschein-Behörde dürfen Bewerbungen ablehnen.",
                 ephemeral=True
             )
@@ -1369,35 +1372,35 @@ class WaffenscheinApplicationView(ui.View):
         )
 
         if not application:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ Die Bewerbung konnte nicht gefunden werden.",
                 ephemeral=True
             )
             return
 
         if application.get("status") == "rejected":
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ **Die Bewerbung wurde bereits abgelehnt.**",
                 ephemeral=True
             )
             return
 
         if application.get("status") == "paid":
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ Diese Bewerbung ist bereits abgeschlossen und bezahlt.",
                 ephemeral=True
             )
             return
 
         if application.get("ticket_channel_id") or application.get("status") in {"ticket_creating", "ticket_open"}:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ Diese Bewerbung hat bereits ein geöffnetes Ticket und kann deshalb nicht mehr abgelehnt werden.",
                 ephemeral=True
             )
             return
 
         if application.get("status") != "pending":
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ Diese Bewerbung kann aktuell nicht abgelehnt werden.",
                 ephemeral=True
             )
@@ -1437,10 +1440,7 @@ class WaffenscheinApplicationView(ui.View):
         button.label = "Bewerbung abgelehnt"
         button.emoji = "❌"
 
-        await interaction.response.edit_message(
-            embed=embed,
-            view=self
-        )
+        await interaction.message.edit(embed=embed, view=self)
 
         # Bewerber bekommt zusätzlich eine private DM.
         await waffenschein_send_dm_status(application, "rejected")
@@ -2194,7 +2194,7 @@ def save_data():
     temp_file=f"{DATA_FILE}.tmp"
     try:
         with open(temp_file,"w",encoding="utf-8") as f:
-            json.dump(data,f,ensure_ascii=False,indent=4); f.flush(); os.fsync(f.fileno())
+            json.dump(data,f,ensure_ascii=False,indent=4); f.flush()
         os.replace(temp_file,DATA_FILE)
     except Exception as e:
         print(f"Fehler beim Speichern der Datenbank: {e}")
@@ -2210,6 +2210,8 @@ fullmute_warned = set()
 voice_join_times = {}
 
 leaderboard_message_id = None
+leaderboard_refresh_lock = asyncio.Lock()
+leaderboard_last_refresh = 0.0
 
 def get_last_dizzy_control(target_id: int):
     records=[r for r in durchgefuehrte_kontrollen if r.get("target_id")==target_id]
@@ -2818,7 +2820,7 @@ class ModerationEintragModal(ui.Modal):
 
         r_name = self.roblox_name.value.strip()
         
-        roblox_id = get_roblox_user_id(r_name)
+        roblox_id = await asyncio.to_thread(get_roblox_user_id, r_name)
         if not roblox_id:
             await interaction.followup.send(f"❌ Den Benutzer **{r_name}** gibt es auf Roblox nicht. Es wurde kein Eintrag erstellt.", ephemeral=True)
             return
@@ -2886,12 +2888,12 @@ class ModerationEintragModal(ui.Modal):
                 b_embed.add_field(name="⚠️ Auslöser", value=f"`{bolo_data['warn_count']}`", inline=True)
                 b_embed.add_field(name="🛡️ Erstellt von", value=interaction.user.mention, inline=False)
                 b_embed.set_footer(text="Sirius RP • Ban Bolo System")
-                avatar_url_check = get_roblox_avatar_url(r_name)
+                avatar_url_check = await asyncio.to_thread(get_roblox_avatar_url, r_name)
                 if avatar_url_check:
                     b_embed.set_thumbnail(url=avatar_url_check)
                 await bolo_log_kanal.send(embed=b_embed)
 
-        avatar_url = get_roblox_avatar_url(r_name)
+        avatar_url = await asyncio.to_thread(get_roblox_avatar_url, r_name)
 
         await send_moderation_log(
             guild=interaction.guild,
@@ -3131,7 +3133,7 @@ class BanBoloMainView(ui.View):
 
         for bolo in sorted_bolos:
             r_name = bolo['roblox_name']
-            avatar_url = get_roblox_avatar_url(r_name)
+            avatar_url = await asyncio.to_thread(get_roblox_avatar_url, r_name)
 
             embed = discord.Embed(
                 title=f"🚨 Offizielle Ban Bolo — {r_name}",
@@ -3481,28 +3483,45 @@ async def check_voice_xp():
             fullmute_timers.pop(user_id, None)
             fullmute_warned.discard(user_id)
 
-async def refresh_leaderboard_in_channel():
-    global leaderboard_message_id
+async def refresh_leaderboard_in_channel(force: bool = False):
+    global leaderboard_message_id, leaderboard_last_refresh
     kanal = bot.get_channel(LEADERBOARD_KANAL_ID)
     if not kanal:
         return
+
+    now = time.monotonic()
+    if not force and now - leaderboard_last_refresh < 3.0:
+        return
+
+    async with leaderboard_refresh_lock:
+        now = time.monotonic()
+        if not force and now - leaderboard_last_refresh < 3.0:
+            return
+        leaderboard_last_refresh = now
+        try:
+            embed = build_leaderboard_embed(kanal.guild)
+            view = LeaderboardTop30View()
+            if leaderboard_message_id:
+                try:
+                    msg = await kanal.fetch_message(leaderboard_message_id)
+                    await msg.edit(embed=embed, view=view)
+                    return
+                except discord.NotFound:
+                    leaderboard_message_id = None
+
+            async for msg in kanal.history(limit=20):
+                if msg.author == bot.user and msg.embeds and "XP Leaderboard" in (msg.embeds[0].title or ""):
+                    leaderboard_message_id = msg.id
+                    await msg.edit(embed=embed, view=view)
+                    return
+        except Exception as e:
+            print(f"Fehler beim Aktualisieren des Leaderboards: {e}")
+
+def schedule_leaderboard_refresh():
     try:
-        embed = build_leaderboard_embed(kanal.guild)
-        view = LeaderboardTop30View()
-        if leaderboard_message_id:
-            try:
-                msg = await kanal.fetch_message(leaderboard_message_id)
-                await msg.edit(embed=embed, view=view)
-                return
-            except discord.NotFound:
-                pass
-        async for msg in kanal.history(limit=20):
-            if msg.author == bot.user and msg.embeds and "XP Leaderboard" in (msg.embeds[0].title or ""):
-                leaderboard_message_id = msg.id
-                await msg.edit(embed=embed, view=view)
-                return
-    except Exception as e:
-        print(f"Fehler beim Aktualisieren des Leaderboards: {e}")
+        asyncio.create_task(refresh_leaderboard_in_channel())
+    except RuntimeError:
+        pass
 
 @bot.event
 async def on_member_update(before, after):
@@ -3587,14 +3606,14 @@ async def on_message(message: discord.Message):
             text_cooldowns[user_id] = current_time
             added = add_xp(user_id, 5)
             if added > 0:
-                await log_xp_action(
+                asyncio.create_task(log_xp_action(
                     message.guild,
                     message.author,
                     added,
                     "Nachrichten XP",
                     f"Verfassen einer Nachricht in {message.channel.mention}"
-                )
-            await refresh_leaderboard_in_channel()
+                ))
+            schedule_leaderboard_refresh()
 
     await bot.process_commands(message)
 
@@ -3681,18 +3700,20 @@ async def xp_add_cmd(interaction: discord.Interaction, user: discord.Member, amo
     if not has_role(interaction.user, XP_GIVE_REMOVE_ROLLE_ID) and not interaction.user.guild_permissions.administrator:
         await interaction.response.send_message("❌ Du hast keine Berechtigung für diesen Befehl!", ephemeral=True)
         return
+
+    await interaction.response.defer(ephemeral=True)
     if not is_team_member(user):
-        await interaction.response.send_message("❌ Du kannst nur Teammitgliedern XP hinzufügen!", ephemeral=True)
+        await interaction.followup.send("❌ Du kannst nur Teammitgliedern XP hinzufügen!", ephemeral=True)
         return
     if amount <= 0:
-        await interaction.response.send_message("❌ Bitte gib eine positive Anzahl an XP ein!", ephemeral=True)
+        await interaction.followup.send("❌ Bitte gib eine positive Anzahl an XP ein!", ephemeral=True)
         return
 
     add_xp(user.id, amount)
     await log_xp_action(interaction.guild, user, amount, "Manuell hinzugefügt", f"Hinzugefügt von {interaction.user.mention}")
     await log_xp_general_action(interaction.guild, "XP Hinzugefügt", f"Teammitglied {user.mention} hat `+{amount} XP` von {interaction.user.mention} erhalten.")
     await refresh_leaderboard_in_channel()
-    await interaction.response.send_message(f"✅ Dem Teammitglied {user.mention} wurden **+{amount} XP** hinzugefügt.", ephemeral=True)
+    await interaction.followup.send(f"✅ Dem Teammitglied {user.mention} wurden **+{amount} XP** hinzugefügt.", ephemeral=True)
 
 @bot.tree.command(name="xp-remove", description="Entferne einem Teammitglied XP.")
 @app_commands.describe(user="Das Teammitglied", amount="Anzahl der XP")
@@ -3700,8 +3721,10 @@ async def xp_remove(interaction: discord.Interaction, user: discord.Member, amou
     if not has_role(interaction.user, XP_GIVE_REMOVE_ROLLE_ID) and not interaction.user.guild_permissions.administrator:
         await interaction.response.send_message("❌ Du hast keine Berechtigung für diesen Befehl!", ephemeral=True)
         return
+
+    await interaction.response.defer(ephemeral=True)
     if amount <= 0:
-        await interaction.response.send_message("❌ Bitte gib eine positive Anzahl an XP ein!", ephemeral=True)
+        await interaction.followup.send("❌ Bitte gib eine positive Anzahl an XP ein!", ephemeral=True)
         return
 
     current = user_xp.get(user.id, 0)
@@ -3711,7 +3734,7 @@ async def xp_remove(interaction: discord.Interaction, user: discord.Member, amou
     await log_xp_action(interaction.guild, user, -amount, "Manuell entfernt", f"Entfernt von {interaction.user.mention}")
     await log_xp_general_action(interaction.guild, "XP Entfernt", f"Teammitglied {user.mention} wurden `{amount} XP` von {interaction.user.mention} abgezogen.")
     await refresh_leaderboard_in_channel()
-    await interaction.response.send_message(f"✅ Dem Teammitglied {user.mention} wurden **-{amount} XP** abgezogen (Aktuell: {new_val} XP).", ephemeral=True)
+    await interaction.followup.send(f"✅ Dem Teammitglied {user.mention} wurden **-{amount} XP** abgezogen (Aktuell: {new_val} XP).", ephemeral=True)
 
 @bot.tree.command(name="xp-lock", description="Sperre die XP-Einnahme eines Teammitglieds für eine bestimmte Zeit.")
 @app_commands.describe(user="Das Teammitglied", duration="Dauer (z.B. 30m, 2h, 1d)", grund="Grund für den XP-Lock")
@@ -3720,14 +3743,16 @@ async def xp_lock(interaction: discord.Interaction, user: discord.Member, durati
         await interaction.response.send_message("❌ Du hast keine Berechtigung für diesen Befehl!", ephemeral=True)
         return
 
+    await interaction.response.defer(ephemeral=True)
+
     seconds, readable = parse_duration(duration)
     if not seconds:
-        await interaction.response.send_message("❌ Ungültiges Format! Nutze z.B. `30m`, `2h` oder `1d`.", ephemeral=True)
+        await interaction.followup.send("❌ Ungültiges Format! Nutze z.B. `30m`, `2h` oder `1d`.", ephemeral=True)
         return
 
     xp_locks[user.id] = time.time() + seconds
     save_data()
-    await interaction.response.send_message(f"🔒 Die XP für {user.mention} wurden für **{readable}** gesperrt.", ephemeral=True)
+    await interaction.followup.send(f"🔒 Die XP für {user.mention} wurden für **{readable}** gesperrt.", ephemeral=True)
 
     dm_embed = discord.Embed(
         title="🔒 Deine XP wurden gesperrt",
@@ -3748,17 +3773,19 @@ async def xp_unlock(interaction: discord.Interaction, user: discord.Member, grun
         await interaction.response.send_message("❌ Du hast keine Berechtigung für diesen Befehl!", ephemeral=True)
         return
 
+    await interaction.response.defer(ephemeral=True)
+
     if user.id in xp_locks:
         xp_locks.pop(user.id, None)
         save_data()
-        await interaction.response.send_message(f"🔓 Die XP-Sperre für {user.mention} wurde erfolgreich aufgehoben.", ephemeral=True)
+        await interaction.followup.send(f"🔓 Die XP-Sperre für {user.mention} wurde erfolgreich aufgehoben.", ephemeral=True)
         try:
             await user.send(embed=discord.Embed(title="🔓 Deine XP wurden entsperrt", description=f"Deine XP-Sperre wurde vorzeitig aufgehoben.\n\n**Grund:** {grund}", color=discord.Color.green()))
         except discord.Forbidden:
             pass
         await log_xp_general_action(interaction.guild, "XP Unlock", f"Sperre für {user.mention} wurde von {interaction.user.mention} aufgehoben.\n**Grund:** {grund}")
     else:
-        await interaction.response.send_message(f"ℹ️ {user.mention} hat aktuell keine aktive XP-Sperre.", ephemeral=True)
+        await interaction.followup.send(f"ℹ️ {user.mention} hat aktuell keine aktive XP-Sperre.", ephemeral=True)
 
 @bot.tree.command(name="xp-boost", description="Aktiviere einen XP Boost für unsere Teammitglieder.")
 @app_commands.describe(percentage="Prozentzahl des Boosts (z.B. 50 for +50%)", duration="Dauer (z.B. 2h, 1d)")
@@ -3767,14 +3794,16 @@ async def xp_boost(interaction: discord.Interaction, percentage: int, duration: 
         await interaction.response.send_message("❌ Du hast keine Berechtigung für diesen Befehl!", ephemeral=True)
         return
 
+    await interaction.response.defer(ephemeral=True)
+
     global active_xp_boost
     if active_xp_boost and time.time() < active_xp_boost['end_timestamp']:
-        await interaction.response.send_message("❌ Es ist bereits ein XP Boost aktiv! Du kannst erst einen neuen aktivieren, wenn der alte abgelaufen ist oder mit `/boost-stop` gestoppt wurde.", ephemeral=True)
+        await interaction.followup.send("❌ Es ist bereits ein XP Boost aktiv! Du kannst erst einen neuen aktivieren, wenn der alte abgelaufen ist oder mit `/boost-stop` gestoppt wurde.", ephemeral=True)
         return
 
     seconds, readable = parse_duration(duration)
     if not seconds:
-        await interaction.response.send_message("❌ Ungültiges Format! Nutze z.B. `30m`, `2h` oder `1d`.", ephemeral=True)
+        await interaction.followup.send("❌ Ungültiges Format! Nutze z.B. `30m`, `2h` oder `1d`.", ephemeral=True)
         return
 
     active_xp_boost = {
@@ -3783,7 +3812,7 @@ async def xp_boost(interaction: discord.Interaction, percentage: int, duration: 
     }
     save_data()
 
-    await interaction.response.send_message(f"🚀 XP-Boost von **+{percentage}%** für **{readable}** aktiviert!", ephemeral=True)
+    await interaction.followup.send(f"🚀 XP-Boost von **+{percentage}%** für **{readable}** aktiviert!", ephemeral=True)
 
     boost_channel = bot.get_channel(XP_BOOST_ANNOUNCEMENT_KANAL_ID)
     if boost_channel:
@@ -3805,15 +3834,17 @@ async def boost_stop(interaction: discord.Interaction):
         await interaction.response.send_message("❌ Du hast keine Berechtigung für diesen Befehl!", ephemeral=True)
         return
 
+    await interaction.response.defer(ephemeral=True)
+
     global active_xp_boost
     if not active_xp_boost or time.time() >= active_xp_boost['end_timestamp']:
         active_xp_boost = None
-        await interaction.response.send_message("❌ Aktuell läuft kein XP Boost, der gestoppt werden könnte.", ephemeral=True)
+        await interaction.followup.send("❌ Aktuell läuft kein XP Boost, der gestoppt werden könnte.", ephemeral=True)
         return
 
     active_xp_boost = None
     save_data()
-    await interaction.response.send_message("✅ Der aktuelle XP Boost wurde erfolgreich gestoppt.", ephemeral=True)
+    await interaction.followup.send("✅ Der aktuelle XP Boost wurde erfolgreich gestoppt.", ephemeral=True)
 
     boost_channel = bot.get_channel(XP_BOOST_ANNOUNCEMENT_KANAL_ID)
     if boost_channel:
@@ -3858,22 +3889,25 @@ async def xp_reset(interaction: discord.Interaction):
         await interaction.response.send_message("❌ Nur Administratoren können das gesamte Leaderboard zurücksetzen!", ephemeral=True)
         return
 
+    await interaction.response.defer(ephemeral=True)
+
     user_xp.clear()
     save_data()
     await log_xp_general_action(interaction.guild, "XP Reset", f"Das gesamte XP-Leaderboard wurde von {interaction.user.mention} zurückgesetzt.")
     await refresh_leaderboard_in_channel()
-    await interaction.response.send_message("🗑️ Das gesamte XP-Leaderboard wurde erfolgreich zurückgesetzt.", ephemeral=True)
+    await interaction.followup.send("🗑️ Das gesamte XP-Leaderboard wurde erfolgreich zurückgesetzt.", ephemeral=True)
 
 @bot.tree.command(name="dizzykontrolle", description="Führe eine Dizzykontrolle für ein Mitglied durch.")
 @app_commands.describe(user="Wähle das Mitglied aus, das kontrolliert wurde")
 async def dizzykontrolle(interaction: discord.Interaction, user: discord.Member):
+    await interaction.response.defer(ephemeral=True)
     if not is_team_member(interaction.user):
-        await interaction.response.send_message("❌ Keine Berechtigung!", ephemeral=True); return
+        await interaction.followup.send("❌ Keine Berechtigung!", ephemeral=True); return
     if interaction.channel_id != DIZZY_KANAL_ID:
-        await interaction.response.send_message(f"❌ Nur im Kanal <#{DIZZY_KANAL_ID}> erlaubt!", ephemeral=True); return
+        await interaction.followup.send(f"❌ Nur im Kanal <#{DIZZY_KANAL_ID}> erlaubt!", ephemeral=True); return
     mod_id,target_id=interaction.user.id,user.id
     if mod_id==target_id:
-        await interaction.response.send_message("❌ Du kannst dich nicht selbst dizzy kontrollieren!", ephemeral=True); return
+        await interaction.followup.send("❌ Du kannst dich nicht selbst dizzy kontrollieren!", ephemeral=True); return
 
     latest=dizzy_last_message.get(target_id)
     try:
@@ -3881,11 +3915,11 @@ async def dizzykontrolle(interaction: discord.Interaction, user: discord.Member)
             if msg.author.id==target_id and not msg.author.bot:
                 latest={"message_id":msg.id,"timestamp":msg.created_at.timestamp()}; break
     except discord.Forbidden:
-        await interaction.response.send_message("❌ Ich kann den Nachrichtenverlauf nicht prüfen. Mir fehlt die Berechtigung zum Lesen des Verlaufs.", ephemeral=True); return
+        await interaction.followup.send("❌ Ich kann den Nachrichtenverlauf nicht prüfen. Mir fehlt die Berechtigung zum Lesen des Verlaufs.", ephemeral=True); return
     except discord.HTTPException:
         pass
     if latest is None:
-        await interaction.response.send_message(f"❌ {user.mention} hat noch keine Nachricht in diesem Kanal geschrieben. Die Person muss zuerst dort eine Nachricht schreiben.", ephemeral=True); return
+        await interaction.followup.send(f"❌ {user.mention} hat noch keine Nachricht in diesem Kanal geschrieben. Die Person muss zuerst dort eine Nachricht schreiben.", ephemeral=True); return
 
     last=get_last_dizzy_control(target_id); now=time.time()
     if last:
@@ -3893,9 +3927,9 @@ async def dizzykontrolle(interaction: discord.Interaction, user: discord.Member)
         if remaining>0:
             minutes=int(remaining//60); seconds=int(remaining%60)
             text=f"{minutes} Min. {seconds:02d} Sek." if minutes else f"{seconds} Sek."
-            await interaction.response.send_message(f"⏳ {user.mention} wurde gerade erst überprüft. Du kannst diese Person erst wieder in **{text}** kontrollieren.", ephemeral=True); return
+            await interaction.followup.send(f"⏳ {user.mention} wurde gerade erst überprüft. Du kannst diese Person erst wieder in **{text}** kontrollieren.", ephemeral=True); return
         if latest["message_id"] <= int(last.get("message_id",0)):
-            await interaction.response.send_message(f"❌ {user.mention} hat seit der letzten Dizzykontrolle keine neue Nachricht im Kanal geschrieben. Die Person muss zuerst erneut dort schreiben.", ephemeral=True); return
+            await interaction.followup.send(f"❌ {user.mention} hat seit der letzten Dizzykontrolle keine neue Nachricht im Kanal geschrieben. Die Person muss zuerst erneut dort schreiben.", ephemeral=True); return
 
     durchgefuehrte_kontrollen.append({"mod_id":mod_id,"target_id":target_id,"message_id":int(latest["message_id"]),"timestamp":now})
     save_data()
@@ -3906,7 +3940,7 @@ async def dizzykontrolle(interaction: discord.Interaction, user: discord.Member)
     boost_info=""
     if active_xp_boost and time.time()<active_xp_boost.get("end_timestamp",0): boost_info=f" *(inkl. +{active_xp_boost['percentage']}% Boost)*"
     embed=discord.Embed(title="Dizzykontrolle durchgeführt ✅",description=f"**Teammitglied:** {interaction.user.mention}\n**Kontrollierte Person:** {user.mention}\n\n🎁 **Belohnung:** `+{received_xp} XP`{boost_info}\n⏱️ **Erneute Kontrolle:** nach 5 Minuten und einer neuen Nachricht der Person",color=discord.Color.green())
-    await interaction.response.send_message(embed=embed)
+    await interaction.followup.send(embed=embed)
     try:
         original_msg=await interaction.original_response(); await original_msg.delete(delay=60)
     except Exception: pass
@@ -4072,6 +4106,18 @@ async def setuptimeleaderboard(ctx):
     )
     await kanal.send(embed=embed, view=TimeLeaderboardView())
     await ctx.send("✅ Zeitauswahl-Panel gesendet!")
+
+@bot.event
+async def on_command_error(ctx, error):
+    if isinstance(error, commands.CommandNotFound):
+        return
+    if isinstance(error, commands.MissingPermissions):
+        try:
+            await ctx.send("❌ Du hast keine Berechtigung für diesen Befehl.", delete_after=8)
+        except discord.HTTPException:
+            pass
+        return
+    print(f"❌ Command-Fehler bei !{getattr(ctx.command, 'qualified_name', 'unbekannt')}: {error!r}")
 
 # ==========================================
 # BOT STARTEN
