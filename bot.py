@@ -3068,5 +3068,14 @@ async def setupbanbolo(ctx):
     await channel.send(embed=embed, view=BanBoloMainView())
     await ctx.send("✅ Ban-Bolo-Panel gesendet!")
 
-print("🚀 Discord-Bot wird gestartet...")
+print(f"🟢 DISCORD ONLINE: {bot.user} | ID: {bot.user.id}")
+
+@bot.event
+async def on_disconnect():
+    print("⚠️ DISCORD: Verbindung getrennt!")
+
+@bot.event
+async def on_resumed():
+    print("🔄 DISCORD: Verbindung wiederhergestellt!")
+
 bot.run(os.getenv("DISCORD_TOKEN"))
