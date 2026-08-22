@@ -1878,215 +1878,26 @@ async def waffenschein_process_dm(message: discord.Message):
     return True
 
 
-# ==========================================
-# HELPER FUNCTIONS & TEAMLISTE LOGIK
-# ==========================================
-async def send_private_protocol(leader_user: discord.User, protocol_content: str):
-    try:
-        await leader_user.send(
-            f"📋 **Hier ist das Protokoll deiner letzten Sitzung:**\n\n{protocol_content}"
-        )
-        print("Protokoll erfolgreich privat zugestellt.")
-    except discord.Forbidden:
-        print("Fehler: Der Gesprächsleiter hat DMs deaktiviert.")
+app = Flask(__name__)
 
-async def send_moderation_log(guild: discord.Guild, action_type: str, roblox_name: str, grund: str, dauer: str, moderator: str, avatar_url: str = None):
-    kanal = guild.get_channel(1527349831444729868)
-    if not kanal:
-        return
-    embed = discord.Embed(
-        title=f"🚨 Moderations-Aktion: {action_type}",
-        color=discord.Color.red()
-    )
-    embed.add_field(name="👤 Roblox-Name", value=f"`{roblox_name}`", inline=True)
-    embed.add_field(name="📌 Typ", value=f"`{action_type}`", inline=True)
-    embed.add_field(name="⏳ Dauer", value=f"`{dauer}`", inline=True)
-    embed.add_field(name="📝 Grund", value=grund, inline=False)
-    embed.add_field(name="🛡️ Moderator", value=moderator, inline=False)
-    if avatar_url:
-        embed.set_thumbnail(url=avatar_url)
-    embed.set_footer(text="Sirius RP • Moderations-Log")
-    await kanal.send(embed=embed)
-
-def formatiere_liste(mitglieder):
-    if not mitglieder:
-        return ""
-
-    text = ""
-    for i, member in enumerate(mitglieder):
-        if i == len(mitglieder) - 1:
-            text += f"└ {member.mention}\n"
-        else:
-            text += f"├ {member.mention}\n"
-    return text
-
-async def generiere_team_embeds(guild: discord.Guild):
-    embeds = []
-
-    leitung_ids = [
-        1527739219907449022,
-        1527349818068959301,
-        1527349818068959300,
-        1527349818068959299,
-        1527349818068959298,
-        1527349818068959297,
-        1527349818068959296,
-        1527349818068959295,
-    ]
-    embed_leitung = discord.Embed(
-        title="Teamliste | Sirius RP 📰", color=discord.Color.blue()
-    )
-    content_leitung = "## ▬▬ 👑Leitungsteam ▬▬\n"
-    for r_id in leitung_ids:
-        role = guild.get_role(r_id)
-        if role:
-            gueltige_mitglieder = []
-            for m in role.members:
-                user_hauptrollen = [
-                    guild.get_role(rid) for rid in HAUPT_ROLLEN if guild.get_role(rid) in m.roles
-                ]
-                if user_hauptrollen and user_hauptrollen[0] == role:
-                    gueltige_mitglieder.append(m)
-
-            content_leitung += f"**{role.name}**\n"
-            formatted = formatiere_liste(gueltige_mitglieder)
-            if formatted:
-                content_leitung += formatted
-            content_leitung += "\n"
-    embed_leitung.description = content_leitung
-    embeds.append(embed_leitung)
-
-    fuehrung_ids = [
-        1527349818068959293,
-        1527349818068959292,
-        1527349818031214721,
-        1527349818031214720,
-        1527349818031214719,
-        1527349817875890355,
-    ]
-    embed_fuehrung = discord.Embed(color=discord.Color.blue())
-    content_fuehrung = "## ▬▬ 👨‍💼Führungsteam ▬▬\n"
-    for r_id in fuehrung_ids:
-        role = guild.get_role(r_id)
-        if role:
-            gueltige_mitglieder = []
-            for m in role.members:
-                user_hauptrollen = [
-                    guild.get_role(rid) for rid in HAUPT_ROLLEN if guild.get_role(rid) in m.roles
-                ]
-                if user_hauptrollen and user_hauptrollen[0] == role:
-                    gueltige_mitglieder.append(m)
-
-            content_fuehrung += f"**{role.name}**\n"
-            formatted = formatiere_liste(gueltige_mitglieder)
-            if formatted:
-                content_fuehrung += formatted
-            content_fuehrung += "\n"
-    embed_fuehrung.description = content_fuehrung
-    embeds.append(embed_fuehrung)
-
-    admin_ids = [
-        1527349817800523855,
-        1527349817800523854,
-        1527349817800523853,
-    ]
-    embed_admin = discord.Embed(color=discord.Color.blue())
-    content_admin = "## ▬▬ ⚙️Admin-Team ▬▬\n"
-    for r_id in admin_ids:
-        role = guild.get_role(r_id)
-        if role:
-            gueltige_mitglieder = []
-            for m in role.members:
-                user_hauptrollen = [
-                    guild.get_role(rid) for rid in HAUPT_ROLLEN if guild.get_role(rid) in m.roles
-                ]
-                if user_hauptrollen and user_hauptrollen[0] == role:
-                    gueltige_mitglieder.append(m)
-
-            content_admin += f"**{role.name}**\n"
-            formatted = formatiere_liste(gueltige_mitglieder)
-            if formatted:
-                content_admin += formatted
-            content_admin += "\n"
-    embed_admin.description = content_admin
-    embeds.append(embed_admin)
-
-    mod_ids = [1527349817800523851, 1527349817800523850, 1527349817800523849]
-    embed_mod = discord.Embed(color=discord.Color.blue())
-    content_mod = "## ▬▬ ⚖️Moderations-Team ▬▬\n"
-    for r_id in mod_ids:
-        role = guild.get_role(r_id)
-        if role:
-            gueltige_mitglieder = []
-            for m in role.members:
-                user_hauptrollen = [
-                    guild.get_role(rid) for rid in HAUPT_ROLLEN if guild.get_role(rid) in m.roles
-                ]
-                if user_hauptrollen and user_hauptrollen[0] == role:
-                    gueltige_mitglieder.append(m)
-
-            content_mod += f"**{role.name}**\n"
-            formatted = formatiere_liste(gueltige_mitglieder)
-            if formatted:
-                content_mod += formatted
-            content_mod += "\n"
-    embed_mod.description = content_mod
-    embeds.append(embed_mod)
-
-    supp_ids = [
-        1527349817800523847,
-        1527349817708122191,
-        1527349817708122190,
-    ]
-    embed_supp = discord.Embed(color=discord.Color.blue())
-    content_supp = "## ▬▬ 🛡️Support-Team ▬▬\n"
-    for r_id in supp_ids:
-        role = guild.get_role(r_id)
-        if role:
-            gueltige_mitglieder = []
-            for m in role.members:
-                user_hauptrollen = [
-                    guild.get_role(rid) for rid in HAUPT_ROLLEN if guild.get_role(rid) in m.roles
-                ]
-                if user_hauptrollen and user_hauptrollen[0] == role:
-                    gueltige_mitglieder.append(m)
-
-            content_supp += f"**{role.name}**\n"
-            formatted = formatiere_liste(gueltige_mitglieder)
-            if formatted:
-                content_supp += formatted
-            content_supp += "\n"
-    embed_supp.description = content_supp
-    embeds.append(embed_supp)
-
-    embed_neben = discord.Embed(color=discord.Color.gold())
-    content_neben = "## ▬▬ 🚀Nebenrollen ▬▬\n"
-    for r_id in NEBEN_ROLLEN:
-        role = guild.get_role(r_id)
-        if role:
-            content_neben += f"**{role.name}**\n"
-            formatted = formatiere_liste(list(role.members))
-            if formatted:
-                content_neben += formatted
-            content_neben += "\n"
-    embed_neben.description = content_neben
-    embeds.append(embed_neben)
-
-    return embeds
-
-app = Flask('')
-
-@app.route('/', methods=['GET', 'HEAD'])
+@app.route("/", methods=["GET", "HEAD"])
 def home():
-    return "Bot ist online!"
+    return "Bot ist online!", 200
 
 def run():
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host='0.0.0.0', port=port)
+    # Render supplies PORT automatically. 10000 is the normal Render fallback.
+    port = int(os.environ.get("PORT", "10000"))
+    try:
+        from werkzeug.serving import make_server
+        server = make_server("0.0.0.0", port, app, threaded=True)
+        print(f"🌐 Health-Server läuft auf Port {port}")
+        server.serve_forever()
+    except Exception as e:
+        print(f"❌ Health-Server konnte nicht gestartet werden: {type(e).__name__}: {e}")
 
 def keep_alive():
-    t = Thread(target=run)
-    t.start()
+    thread = Thread(target=run, name="health-server", daemon=True)
+    thread.start()
 
 keep_alive()
 
@@ -3257,7 +3068,5 @@ async def setupbanbolo(ctx):
     await channel.send(embed=embed, view=BanBoloMainView())
     await ctx.send("✅ Ban-Bolo-Panel gesendet!")
 
-
 print("🚀 Discord-Bot wird gestartet...")
-
 bot.run(os.getenv("DISCORD_TOKEN"))
