@@ -2986,6 +2986,7 @@ async def on_ready():
         bot.add_view(VerifyView())
         bot.add_view(StartBewerbungView())
         bot.add_view(WaffenscheinView())
+        bot.add_view(WaffenscheinCheckView())
         bot.add_view(WaffenscheinApplicationView())
         bot.add_view(WaffenscheinPaidView())
         bot._persistent_views_registered = True
@@ -3011,8 +3012,66 @@ async def on_message(message):
 
     await bot.process_commands(message)
 
-@bot.command()
-async def setupwaffenschein(ctx):
+class WaffenscheinCheckView(ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+        self.user_select = ui.UserSelect(
+            placeholder="Wähle eine Person aus...",
+            min_values=1,
+            max_values=1,
+            custom_id="waffenschein_person_auswahl"
+        )
+        self.user_select.callback = self.user_selected
+        self.add_item(self.user_select)
+
+    async def user_selected(self, interaction: discord.Interaction):
+        if interaction.guild is None:
+            await interaction.response.send_message(
+                "❌ Diese Auswahl kann nur auf dem Server verwendet werden.",
+                ephemeral=True
+            )
+            return
+
+        selected_user = self.user_select.values[0]
+        member = selected_user if isinstance(selected_user, discord.Member) else interaction.guild.get_member(selected_user.id)
+
+        if member is None:
+            try:
+                member = await interaction.guild.fetch_member(selected_user.id)
+            except Exception:
+                member = None
+
+        if member is None:
+            await interaction.response.send_message(
+                "❌ Die ausgewählte Person konnte nicht gefunden werden.",
+                ephemeral=True
+            )
+            return
+
+        hat_klein = any(role.id == KLEINER_WAFFENSCHEIN_ROLLE_ID for role in member.roles)
+        hat_gross = any(role.id == GROSSER_WAFFENSCHEIN_ROLLE_ID for role in member.roles)
+
+        klein_status = "🟢 **Ja**" if hat_klein else "🔴 **Nein**"
+        gross_status = "🟢 **Ja**" if hat_gross else "🔴 **Nein**"
+
+        embed = discord.Embed(
+            title="🧨 Waffenschein-Status",
+            description=(
+                f"**Person:** {member.mention}\n"
+                f"**Benutzername:** `{member}`\n\n"
+                f"🔫 **Kleiner Waffenschein:** {klein_status}\n"
+                f"🧨 **Großer Waffenschein:** {gross_status}"
+            ),
+            color=discord.Color.green() if (hat_klein or hat_gross) else discord.Color.red()
+        )
+        embed.set_footer(text="Sirius RP • Waffenschein-Behörde")
+
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+@bot.command(name="setupwaffenscheinbewerbung")
+async def setupwaffenscheinbewerbung(ctx):
     if (
         not any(r.id == RELOAD_COMMAND_ROLLE_ID for r in ctx.author.roles)
         and not ctx.author.guild_permissions.administrator
@@ -3023,17 +3082,52 @@ async def setupwaffenschein(ctx):
     embed = discord.Embed(
         title="🛡️ Waffenschein-Behörde | Lizenz-Antrag",
         description=(
-            "Willkommen bei der Behörde für Waffenlizenzen!\n\n"
-            "**🔫 Kleiner Waffenschein:**\n"
-            "Für den zivilen Selbstschutz.\n\n"
-            "**🧨 Großer Waffenschein:**\n"
-            "Für besonders regulierte RP-Situationen.\n\n"
-            "Wähle unten die gewünschte Lizenz aus. "
-            "Die Bewerbung findet anschließend privat per DM statt."
+            "Willkommen bei der Behörde für Waffenlizenzen! Du möchtest dich selbst schützen "
+            "oder benötigst eine Waffe für deinen Beruf? Hier kannst du ganz offiziell deinen "
+            "Waffenschein beantragen.\n"
+            "Bitte lies dir genau durch, welche Lizenz für dich infrage kommt, bevor du deine Bewerbung abschickst:\n\n"
+            "[**🔫**](https://discord.com/assets/445896d2723c236e.svg) **1. Kleiner Waffenschein:** "
+            "Diese Lizenz ist für Zivilisten gedacht, die sich im äußersten Notfall selbst verteidigen müssen.\n\n"
+            "- **Erlaubte Waffen:** Leichte Handfeuerwaffen (z. B. Desert Eagle, Glock 17)\n"
+            "- **Voraussetzungen:** Eine weitestgehend saubere Strafakte, geistige Zurechnungsfähigkeit und ein sicheres Auftreten.\n"
+            "- **Zweck:** Reiner Selbstschutz im Alltag.\n\n"
+            "[**🧨**](https://discord.com/assets/2f494c624f090ae6.svg) **2. Großer Waffenschein:** "
+            "Diese Lizenz ist streng reguliert, deutlich schwerer zu bekommen und oft an spezielle Berufe geknüpft.\n\n"
+            "- **Erlaubte Waffen:** Maschinenpistolen (MP5), Sturmgewehre (M4 Karabiner, G36) und Scharfschützengewehre (Sniper).\n"
+            "- **Voraussetzungen:** Eine absolut saubere Strafakte und ein triftiger Grund (z. B. eingetragener Personenschutz, Security, Werttransport).\n"
+            "- **Zweck:** Professioneller Schutz in Hochrisiko-Situationen.\n\n"
+            "Wähle unten die gewünschte Lizenz aus. Die Bewerbung selbst findet anschließend **privat per DM** statt."
         ),
         color=discord.Color.red(),
     )
+
     await ctx.send(embed=embed, view=WaffenscheinView())
+
+    try:
+        await ctx.message.delete()
+    except Exception:
+        pass
+
+
+@bot.command(name="setupwaffenschein")
+async def setupwaffenschein(ctx):
+    if (
+        not any(r.id == RELOAD_COMMAND_ROLLE_ID for r in ctx.author.roles)
+        and not ctx.author.guild_permissions.administrator
+    ):
+        await ctx.send("❌ Du hast keine Berechtigung dafür.")
+        return
+
+    embed = discord.Embed(
+        title="Waffenscheine sehen 🧨",
+        description=(
+            "Hier kannst du überprüfen und sehen wer einen Waffenschein hat und wer nicht.\n\n"
+            "Wähle unten einfach eine Person aus und dann kannst du es auch schon direkt sehen!"
+        ),
+        color=discord.Color.red(),
+    )
+
+    await ctx.send(embed=embed, view=WaffenscheinCheckView())
 
     try:
         await ctx.message.delete()
