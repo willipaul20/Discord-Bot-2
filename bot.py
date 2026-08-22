@@ -982,14 +982,14 @@ class WaffenscheinStartView(ui.View):
             waffenschein_bewerbungen.pop(application_id, None)
             save_waffenschein_data()
 
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ Ich konnte dir keine DM schicken. "
                 "Bitte aktiviere deine Direktnachrichten für diesen Server und versuche es erneut.",
                 ephemeral=True
             )
             return
 
-        await interaction.response.send_message(
+        await interaction.followup.send(
             "✅ Die Bewerbung wurde gestartet. Ich habe dir die erste Frage per DM geschickt.",
             ephemeral=True
         )
@@ -2977,6 +2977,8 @@ async def on_member_remove(member):
 
 @bot.event
 async def on_ready():
+    print(f"🔄 Discord-Verbindung hergestellt: {bot.user} (ID: {bot.user.id if bot.user else 'unbekannt'})")
+
     if not getattr(bot, "_persistent_views_registered", False):
         bot.add_view(SetupEintragView())
         bot.add_view(BanBoloMainView())
@@ -3112,6 +3114,35 @@ async def setupeintrag(ctx):
     await channel.send(embed=embed, view=SetupEintragView())
     await ctx.send("✅ Eintrag-Panel gesendet!")
 
+@bot.event
+async def on_command_error(ctx, error):
+    if isinstance(error, commands.CommandNotFound):
+        return
+
+    if isinstance(error, commands.MissingPermissions):
+        await ctx.send("❌ Du hast keine Berechtigung für diesen Befehl.", delete_after=8)
+        return
+
+    if isinstance(error, commands.MissingRequiredArgument):
+        await ctx.send(f"❌ Es fehlt ein Argument: `{error.param.name}`.", delete_after=8)
+        return
+
+    if isinstance(error, commands.CommandInvokeError):
+        original = error.original
+        print(f"❌ Fehler in !{ctx.command}: {type(original).__name__}: {original}")
+        try:
+            await ctx.send(
+                "❌ Beim Ausführen des Befehls ist ein interner Fehler aufgetreten. "
+                "Bitte prüfe die Render-Logs.",
+                delete_after=10
+            )
+        except discord.HTTPException:
+            pass
+        return
+
+    print(f"❌ Command-Fehler bei !{ctx.command}: {type(error).__name__}: {error}")
+
+
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def setupbanbolo(ctx):
@@ -3131,5 +3162,8 @@ async def setupbanbolo(ctx):
     )
     await channel.send(embed=embed, view=BanBoloMainView())
     await ctx.send("✅ Ban-Bolo-Panel gesendet!")
+
+
+print("🚀 Discord-Bot wird gestartet...")
 
 bot.run(os.getenv("DISCORD_TOKEN"))
